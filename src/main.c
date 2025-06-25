@@ -1,3 +1,13 @@
+/**
+* @file main.c
+ *
+ * ESP-IDF application to read and display ambient light levels using the BH1750 sensor.
+ *
+ * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
+ *
+ * Apache 2.0 Licensed as described in the file LICENSE
+ */
+
 #include <stdio.h>
 #include <esp_log.h>
 #include <esp_check.h>
@@ -8,7 +18,6 @@
 #include "ssd1306.h"
 #include "oled_utils.h"
 
-
 #define SDA_GPIO 21
 #define SCL_GPIO 22
 #define TAG "MAIN"
@@ -18,7 +27,7 @@ void app_main(void)
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
-    ESP_ERROR_CHECK( i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl) );
+    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl));
 
     // Set up BH1750 descriptor
     // Credit to Eric Gionet<gionet.c.eric@gmail.com>
@@ -26,7 +35,6 @@ void app_main(void)
     bh1750_config_t dev_cfg = I2C_BH1750_CONFIG_DEFAULT;
     bh1750_handle_t dev_hdl;
 
-    // init device
     bh1750_init(i2c0_bus_hdl, &dev_cfg, &dev_hdl);
     if (dev_hdl == NULL)
     {
@@ -42,7 +50,8 @@ void app_main(void)
 
     ssd1306_handle_t oled_hdl;
     ssd1306_init(i2c0_bus_hdl, &oled_cfg, &oled_hdl);
-    if (oled_hdl == NULL) {
+    if (oled_hdl == NULL)
+    {
         ESP_LOGE(APP_TAG, "ssd1306 handle init failed");
     }
 
@@ -51,7 +60,8 @@ void app_main(void)
     ssd1306_clear_display(oled_hdl, false);
     ssd1306_set_contrast(oled_hdl, 0xff);
     esp_err_t err = ssd1306_display_text_x2(oled_hdl, 0, "LUX:", false);
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
     }
 
@@ -72,14 +82,13 @@ void app_main(void)
             ESP_LOGI(APP_TAG, "ambient light:     %.2f lux", lux);
         }
 
-        snprintf(lux_str, sizeof(lux_str), "%.1f", lux);
-
+        snprintf(lux_str, sizeof(lux_str), "%8.1f", lux);
         ESP_LOGI(APP_TAG, "Display Text");
 
-        ssd1306_clear_display(oled_hdl, false);
         err = ssd1306_display_text_x2(oled_hdl, 0, "LUX:", false);
         err = ssd1306_display_text_x2(oled_hdl, 2, lux_str, false);
-        if (err != ESP_OK) {
+        if (err != ESP_OK)
+        {
             ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
         }
         vTaskDelay(1000 / portTICK_PERIOD_MS);

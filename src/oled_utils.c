@@ -1,6 +1,12 @@
-//
-// Created by caden on 6/25/25.
-//
+/**
+* @file oled_utils.c
+ *
+ * Utilities for working with the SSD1306 OLED display.
+ *
+ * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
+ *
+ * Apache 2.0 Licensed as described in the file LICENSE
+ */
 #include <esp_log.h>
 #include "app_config.h"
 #include "oled_utils.h"
