@@ -1,64 +1,90 @@
 #include <stdio.h>
+#include <esp_log.h>
+#include <esp_check.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_config.h"
 #include "bh1750.h"
-#include "i2cdev.h"
 #include "ssd1306.h"
-#include "esp_log.h"
+#include "oled_utils.h"
+
 
 #define SDA_GPIO 21
 #define SCL_GPIO 22
+#define TAG "MAIN"
 
-void app_main(void) {
+void app_main(void)
+{
     // Initialize I2C
-    i2c_master_bus_config_t  i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
-    i2c_master_bus_handle_t  i2c0_bus_hdl;
-    i2cdev_init();
+    i2c_master_bus_handle_t i2c0_bus_hdl;
+    i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
+    ESP_ERROR_CHECK( i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl) );
 
     // Set up BH1750 descriptor
-    i2c_dev_t dev = { 0 };
-    ESP_ERROR_CHECK(bh1750_init_desc(&dev, 0x23, I2C_NUM_0, SDA_GPIO, SCL_GPIO));
-    ESP_ERROR_CHECK(bh1750_setup(&dev, BH1750_MODE_CONTINUOUS, BH1750_RES_HIGH));
+    // Credit to Eric Gionet<gionet.c.eric@gmail.com>
+    // https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS/tree/main/components/peripherals/i2c/esp_bh1750
+    bh1750_config_t dev_cfg = I2C_BH1750_CONFIG_DEFAULT;
+    bh1750_handle_t dev_hdl;
+
+    // init device
+    bh1750_init(i2c0_bus_hdl, &dev_cfg, &dev_hdl);
+    if (dev_hdl == NULL)
+    {
+        ESP_LOGE(APP_TAG, "bh1750 handle init failed");
+        assert(dev_hdl);
+    }
 
     // Set up SSD1306 descriptor
     // Credit to Eric Gionet<gionet.c.eric@gmail.com>
     // https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS/tree/main/components/peripherals/i2c/esp_ssd1306
 
-    ssd1306_config_t dev_cfg         = I2C_SSD1306_128x64_CONFIG_DEFAULT;
-    ssd1306_handle_t dev_hdl;
-    ESP_ERROR_CHECK( i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl) );
+    ssd1306_config_t oled_cfg = I2C_SSD1306_128x64_CONFIG_DEFAULT;
 
-
-    ssd1306_init(i2c0_bus_hdl, &dev_cfg, &dev_hdl);
-    if (dev_hdl == NULL) {
+    ssd1306_handle_t oled_hdl;
+    ssd1306_init(i2c0_bus_hdl, &oled_cfg, &oled_hdl);
+    if (oled_hdl == NULL) {
         ESP_LOGE(APP_TAG, "ssd1306 handle init failed");
-        assert(dev_hdl);
     }
 
-    char lineChar[16];
+    dump_oled_info(oled_hdl);
+    ESP_LOGI(APP_TAG, "Display x3 Text");
+    ssd1306_clear_display(oled_hdl, false);
+    ssd1306_set_contrast(oled_hdl, 0xff);
+    esp_err_t err = ssd1306_display_text_x2(oled_hdl, 0, "LUX:", false);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
+    }
+
+    char lux_str[32];
 
     // Main loop: read and print light levels
-    while (1) {
-        uint16_t lux = 0;
-        if (bh1750_read(&dev, &lux) == ESP_OK) {
-            ESP_LOGE(APP_TAG,"Ambient light: %u lux\n", lux);
-        } else {
-            ESP_LOGE(APP_TAG,"Failed to read from BH1750\n");
+    while (1)
+    {
+        float lux = 0;
+
+        esp_err_t result = bh1750_get_ambient_light(dev_hdl, &lux);
+        if (result != ESP_OK)
+        {
+            ESP_LOGE(APP_TAG, "bh1750 device read failed (%s)", esp_err_to_name(result));
         }
-        ESP_LOGI(APP_TAG, "######################## SSD1306 - START #########################");
+        else
+        {
+            ESP_LOGI(APP_TAG, "ambient light:     %.2f lux", lux);
+        }
 
-        lineChar[0] = 0x01;
-        sprintf(&lineChar[1], "%02d lux", lux);
+        snprintf(lux_str, sizeof(lux_str), "%.1f", lux);
 
-        ESP_LOGI(APP_TAG, "Panel is 128x64");
-        // Display x3 text
-        ESP_LOGI(APP_TAG, "Display x3 Text");
-        ssd1306_clear_display(dev_hdl, false);
-        ssd1306_set_contrast(dev_hdl, 0xff);
-        ssd1306_display_text_x3(dev_hdl, 0, lineChar, false);
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
+        ESP_LOGI(APP_TAG, "Display Text");
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        ssd1306_clear_display(oled_hdl, false);
+        err = ssd1306_display_text_x2(oled_hdl, 0, "LUX:", false);
+        err = ssd1306_display_text_x2(oled_hdl, 2, lux_str, false);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
+        }
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
     }
 }
+
+
+

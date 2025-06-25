@@ -60,7 +60,7 @@
 #define SCH_TASK_STACK_SIZE            (TSK_MINIMAL_STACK_SIZE * 8)
 #define SCH_TASK_PRIORITY              (tskIDLE_PRIORITY + 2)
 
-#define APP_TAG                         "ESP-IDF COMPONENTS [APP]"
+#define APP_TAG                         "SUNLIGHT SENSOR [APP]"
 
 // macros
 
