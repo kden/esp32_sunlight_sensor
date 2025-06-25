@@ -1,0 +1,15 @@
+dependencies:
+  idf:
+    component_hash: null
+    source:
+      type: idf
+    version: 5.4.1
+  k0i05/esp_type_utils:
+    component_hash: null
+    source:
+      path: /home/caden/code/esp32_sunlight_sensor
+      type: local
+    version: '*'
+manifest_hash: 69b6d9911fc6c4862f0299b8ecd3a217645b1f0db835d8cd87ac7f5859ca6a57
+target: esp32
+version: 1.0.0
