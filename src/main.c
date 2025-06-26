@@ -17,13 +17,16 @@
 #include "bh1750.h"
 #include "ssd1306.h"
 #include "oled_utils.h"
+#include "sdkconfig.h"
 
 #define SDA_GPIO 21
 #define SCL_GPIO 22
-#define TAG "MAIN"
 
 void app_main(void)
 {
+    ESP_LOGI(APP_TAG, "Sensor ID: %s\n", CONFIG_SENSOR_ID);
+    ESP_LOGI(APP_TAG, "Bearer Token: %s\n", CONFIG_BEARER_TOKEN);
+
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
@@ -62,7 +65,7 @@ void app_main(void)
     esp_err_t err = ssd1306_display_text_x2(oled_hdl, 0, "LUX:", false);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
+        ESP_LOGE(APP_TAG, "OLED draw failed: %s", esp_err_to_name(err));
     }
 
     char lux_str[32];
@@ -89,7 +92,7 @@ void app_main(void)
         err = ssd1306_display_text_x2(oled_hdl, 2, lux_str, false);
         if (err != ESP_OK)
         {
-            ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
+            ESP_LOGE(APP_TAG, "OLED draw failed: %s", esp_err_to_name(err));
         }
         vTaskDelay(1000 / portTICK_PERIOD_MS);
     }

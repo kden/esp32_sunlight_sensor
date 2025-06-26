@@ -1,0 +1,7 @@
+config SENSOR_ID
+    string "Sensor ID"
+    default "sensor_default"
+
+config BEARER_TOKEN
+    string "Bearer Token"
+    default "token_default"

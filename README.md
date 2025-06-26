@@ -28,7 +28,7 @@ This project was built and tested with the following hardware:
 #### Software
 You will need to have PlatformIO installed and the esp-idf development environment along with the optional IDE of your choice.
 
-I followed the following guide to set up the esp-idf development environment:
+I followed the following guide to set up the esp-idf development environment on Ubuntu 22.04:
 - [ESP-IDF Installation Guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html)
 Contrary to popular advice pushing VSCode for all embedded development, I followed this guide to use esp-idf with CLion:
 - [Working with ESP-IDF in CLion](https://developer.espressif.com/blog/clion/)
