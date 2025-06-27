@@ -1,5 +1,5 @@
 /**
-* @file oled_utils.h
+* @file oled.h
  *
  * Utilities for working with the SSD1306 OLED display.
  *

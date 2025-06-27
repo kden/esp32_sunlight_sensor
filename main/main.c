@@ -11,6 +11,8 @@
 #include <stdio.h>
 #include <esp_log.h>
 #include <esp_check.h>
+#include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_config.h"
@@ -18,11 +20,17 @@
 
 #include "bh1750.h"
 #include "ssd1306.h"
-#include "oled_utils.h"
+#include "oled.h"
+#include "nvs_flash.h"
+#include "wifi.h"
 
 #define SDA_GPIO 21
 #define SCL_GPIO 22
 #define TAG "MAIN"
+
+#define MAX_WIFI_NETWORKS 5
+#define MAX_SSID_LEN 32
+#define MAX_PASS_LEN 64
 
 void app_main(void)
 {
@@ -70,6 +78,24 @@ void app_main(void)
         ESP_LOGE(TAG, "OLED draw failed: %s", esp_err_to_name(err));
     }
 
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    // Initialize Wifi
+    wifi_init_sta();
+
+    // Get and print the MAC address
+    char mac_address_str[18];
+    if (wifi_get_mac_address(mac_address_str) == ESP_OK) {
+        ESP_LOGI(TAG, "Wi-Fi MAC Address: %s", mac_address_str);
+    } else {
+        ESP_LOGE(TAG, "Failed to get Wi-Fi MAC address");
+    }
+
     char lux_str[32];
 
     // Main loop: read and print light levels
@@ -79,7 +105,7 @@ void app_main(void)
         ESP_LOGI(APP_TAG, "Sensor ID (%s)", CONFIG_SENSOR_ID);
         ESP_LOGI(APP_TAG, "Bearer Token (%s)", CONFIG_BEARER_TOKEN);
         ESP_LOGI(APP_TAG, "Wifi Credentials (%s)", CONFIG_WIFI_CREDENTIALS);
-
+        ESP_LOGI(TAG, "Wi-Fi MAC Address: %s", mac_address_str);
 
         esp_err_t result = bh1750_get_ambient_light(dev_hdl, &lux);
         if (result != ESP_OK)

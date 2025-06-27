@@ -1,5 +1,5 @@
 /**
-* @file oled_utils.c
+* @file oled.c
  *
  * Utilities for working with the SSD1306 OLED display.
  *
@@ -9,7 +9,7 @@
  */
 #include <esp_log.h>
 #include "app_config.h"
-#include "oled_utils.h"
+#include "oled.h"
 
 
 void dump_oled_info(ssd1306_handle_t oled_hdl)
