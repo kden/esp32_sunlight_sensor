@@ -14,6 +14,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "app_config.h"
+#include "sdkconfig.h"
+
 #include "bh1750.h"
 #include "ssd1306.h"
 #include "oled_utils.h"
@@ -24,6 +26,9 @@
 
 void app_main(void)
 {
+    printf("Sensor ID: %s\n", CONFIG_SENSOR_ID);
+    printf("Bearer Token: %s\n", CONFIG_BEARER_TOKEN);
+    printf("Wifi Credentials: %s\n", CONFIG_WIFI_CREDENTIALS);
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
@@ -71,6 +76,10 @@ void app_main(void)
     while (1)
     {
         float lux = 0;
+        ESP_LOGI(APP_TAG, "Sensor ID (%s)", CONFIG_SENSOR_ID);
+        ESP_LOGI(APP_TAG, "Bearer Token (%s)", CONFIG_BEARER_TOKEN);
+        ESP_LOGI(APP_TAG, "Wifi Credentials (%s)", CONFIG_WIFI_CREDENTIALS);
+
 
         esp_err_t result = bh1750_get_ambient_light(dev_hdl, &lux);
         if (result != ESP_OK)

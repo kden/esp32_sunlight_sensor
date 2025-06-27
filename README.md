@@ -8,7 +8,6 @@
     - [Software](#software)
   - [Installation](#installation)
 - [Usage](#usage)
-- [Acknowledgments](#acknowledgments)
 - [License](#license)
 
 
@@ -26,10 +25,15 @@ This project was built and tested with the following hardware:
 - SSD1306 0.96" 128x64 OLED Display Module [[Amazon Link](https://www.amazon.com/gp/product/B06XRBYJR8)]
 
 #### Software
-You will need to have PlatformIO installed and the esp-idf development environment along with the optional IDE of your choice.
+These are the versions I tested with; other versions may work as well:
+- Python 3.10
+- esp-idf 6.0 
+- PlatformIO 6.1.18
 
 I followed the following guide to set up the esp-idf development environment:
 - [ESP-IDF Installation Guide](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/get-started/index.html)
+
+ 
 Contrary to popular advice pushing VSCode for all embedded development, I followed this guide to use esp-idf with CLion:
 - [Working with ESP-IDF in CLion](https://developer.espressif.com/blog/clion/)
 Then I installed PlatformIO locally
@@ -37,18 +41,29 @@ Then I installed PlatformIO locally
 pip install platformio
 pio --version
 ```
-I also installed the PlatformIO plugin for CLion.  I ended up using the `pio` command for almost everything 
-instead of the PlatformIO plugin.  
+I ended up using the `pio` command for almost everything 
+instead of the PlatformIO plugin because it was simple and convenient.
 
 ### Installation
-Once you've cloned the repository and have PlatformIO installed, you can build the project and upload it to your ESP32
+After you've cloned the repository, copy the `credentials.ini.example` file
+to `credentials.ini` and update it to 
+use a valid WiFi network, sensor ID, and bearer token for your sensor.
+
+Also copy sdkconfig.sensor.example to sdkconfig.sensor.  You do not need to modify it, 
+because it will be modified by dynamic_envs.py when you build the project.
+However, credentials will be written to it, so you do not want to commit it to your source repository.
+
+Once you have PlatformIO installed, you can build the project and upload it to your ESP32
 board by running the following commands from the root directory:
 ```shell
-pio run -t upload
+SENSOR_ENV=sensor_1 pio run -e dynamic_sensor -t upload
 ```
+where `sensor_1` is the name of an environment you defined in `credentials.ini`.
+`dynamic_sensor` specifies a PlatformIO environment that runs a script to 
+load specific a specific environment to the hardware you're working with.
+The code will run automatically after uploading.
 
 ## Usage
-The code will run automatically after uploading.
 To make sure it's working, you'll probably want to monitor the serial output to see the sensor readings:
 ```shell
 pio device monitor
