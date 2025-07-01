@@ -4,6 +4,10 @@ build
 credentials.ini
 esp32-sunlight-sensor.zip
 min_zipper.sh
+dump.sh
+dumpwifi.sh
 *.proj.*
 sdkconfig.dynamic_sensor
 sdkconfig
+out
+**/*.pem

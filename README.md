@@ -47,11 +47,16 @@ instead of the PlatformIO plugin because it was simple and convenient.
 ### Installation
 After you've cloned the repository, copy the `credentials.ini.example` file
 to `credentials.ini` and update it to 
-use a valid WiFi network, sensor ID, and bearer token for your sensor.
+use a valid WiFi network, sensor ID, and bearer token  for your sensor.  For now, the bearer token 
+is a constant string that will be flashed to the sensor firmware and must be recognized by the API.
 
-Also copy sdkconfig.sensor.example to sdkconfig.sensor.  You do not need to modify it, 
-because it will be modified by dynamic_envs.py when you build the project.
-However, credentials will be written to it, so you do not want to commit it to your source repository.
+Create a PEM file for the HTTPs connection to the sensor API and put it in the main directory.
+
+One way to create the PEM file is to run the following command:
+
+```shell
+openssl s_client -showcerts -connect  api.example.com:443 </dev/null | openssl x509 -outform PEM > server_cert.pem
+````
 
 Once you have PlatformIO installed, you can build the project and upload it to your ESP32
 board by running the following commands from the root directory:
@@ -59,7 +64,7 @@ board by running the following commands from the root directory:
 SENSOR_ENV=sensor_1 pio run -e dynamic_sensor -t upload
 ```
 where `sensor_1` is the name of an environment you defined in `credentials.ini`.
-`dynamic_sensor` specifies a PlatformIO environment that runs a script to 
+`dynamic_sensor` specifies a PlatformIO environment that runs the `dynamic_envs.py` script to 
 load specific a specific environment to the hardware you're working with.
 The code will run automatically after uploading.
 

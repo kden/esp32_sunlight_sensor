@@ -1,7 +1,7 @@
 /**
- * @file wifi.h
+ * @file ntp.h
  *
- * Utilities for working with the onboard WiFi.
+ * Client for time synchronization
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
@@ -9,8 +9,7 @@
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
+
 #pragma once
 
-void wifi_manager_init(void);
-bool wifi_is_connected(void);
-esp_err_t wifi_get_mac_address(char *mac_str);
+void initialize_sntp(void);

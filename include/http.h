@@ -1,0 +1,18 @@
+/**
+ * @file http.h
+ *
+ * HTTP client for sending sensor data.
+ *
+ * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
+ *
+ * Developed with assistance from ChatGPT and Google Gemini.
+ *
+ * Apache 2.0 Licensed as described in the file LICENSE
+ */
+
+#pragma once
+#include "esp_http_client.h"
+
+
+void send_sensor_data(float lux, const char* sensor_id, const char* bearer_token);
+esp_err_t _http_event_handler(esp_http_client_event_t *evt);
