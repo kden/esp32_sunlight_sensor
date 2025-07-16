@@ -14,6 +14,7 @@
 #include "esp_http_client.h"
 #include "cJSON.h"
 #include "http.h"
+#include "sensor_data.h"
 #include <time.h>
 #include <string.h>
 
@@ -27,30 +28,51 @@ extern const uint8_t _binary_server_cert_pem_end[];
 esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
 // Function to send sensor data
-void send_sensor_data(float lux, const char* sensor_id, const char* bearer_token) {
+void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
 
     const char *cert_pem = (const char *)_binary_server_cert_pem_start;
 
-    cJSON *root = cJSON_CreateObject();
-    if (root == NULL) {
-        ESP_LOGE(TAG, "Failed to create JSON object");
+    // Create the root JSON array and add the sensor object to it
+    cJSON *root_array = cJSON_CreateArray();
+    if (root_array == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON array");
         return;
     }
 
-    // Get current time
-    time_t now;
-    time(&now);
-    char timestamp[32];
-    // Format timestamp to ISO 8601 in UTC
-    strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+    for (int i = 0; i < count; i++) {
+        cJSON *sensor_object = cJSON_CreateObject();
+        if (sensor_object == NULL) {
+            ESP_LOGE(TAG, "Failed to create sensor object for reading #%d", i);
+            continue; // Try to send the rest
+        }
 
-    // Create JSON payload
-    cJSON_AddNumberToObject(root, "light_intensity", lux);
-    cJSON_AddStringToObject(root, "sensor_id", sensor_id);
-    cJSON_AddStringToObject(root, "timestamp", timestamp);
+        // Format timestamp to ISO 8601 in UTC
+        char timestamp_str[32];
+        strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", gmtime(&readings[i].timestamp));
 
-    const char *json_payload = cJSON_Print(root);
-    ESP_LOGI(TAG, "Sending JSON: %s", json_payload);
+        // Populate the sensor data object
+        cJSON_AddNumberToObject(sensor_object, "light_intensity", readings[i].lux);
+        cJSON_AddStringToObject(sensor_object, "sensor_id", sensor_id);
+        cJSON_AddStringToObject(sensor_object, "timestamp", timestamp_str);
+        cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET);
+
+        cJSON_AddItemToArray(root_array, sensor_object);
+    }
+
+    if (cJSON_GetArraySize(root_array) == 0) {
+        ESP_LOGW(TAG, "No valid readings to send. Aborting HTTP POST.");
+        cJSON_Delete(root_array);
+        return;
+    }
+
+    // Generate the JSON payload string from the root array
+    const char *json_payload = cJSON_Print(root_array);
+    if (json_payload == NULL) {
+        ESP_LOGE(TAG, "Failed to print JSON payload");
+        cJSON_Delete(root_array);
+        return;
+    }
+    ESP_LOGI(TAG, "Sending JSON with %d records.", cJSON_GetArraySize(root_array));
 
 
     // Configure HTTP client
@@ -81,7 +103,7 @@ void send_sensor_data(float lux, const char* sensor_id, const char* bearer_token
 
     // Cleanup
     esp_http_client_cleanup(client);
-    cJSON_Delete(root);
+    cJSON_Delete(root_array);
     free((void*)json_payload);
 }
 

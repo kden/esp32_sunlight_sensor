@@ -29,7 +29,7 @@
  *
  * Copyright (c) 2024 Eric Gionet (gionet.c.eric@gmail.com)
  *
- * MIT Licensed as described in the file LICENSE
+ * MIT Licensed as described in the file THIRD_PARTY_LICENSES
  */
 #ifndef __APP_CONFIG_H__
 #define __APP_CONFIG_H__
@@ -43,10 +43,15 @@
 #include <freertos/task.h>
 
 #define TSK_MINIMAL_STACK_SIZE         (1024)
-
 #define I2C0_MASTER_PORT               I2C_NUM_0
-#define I2C0_MASTER_SDA_IO             GPIO_NUM_21 // blue
-#define I2C0_MASTER_SCL_IO             GPIO_NUM_22 // yellow
+ 
+// Provide default pin definitions if they are not set by the build environment
+#ifndef CONFIG_SENSOR_SDA_GPIO
+#define CONFIG_SENSOR_SDA_GPIO 21
+#endif
+#ifndef CONFIG_SENSOR_SCL_GPIO
+#define CONFIG_SENSOR_SCL_GPIO 22
+#endif
 //
 #define I2C0_TASK_SAMPLING_RATE        (10) // seconds
 #define I2C0_TASK_STACK_SIZE           (TSK_MINIMAL_STACK_SIZE * 8)
@@ -67,8 +72,8 @@
 #define I2C0_MASTER_CONFIG_DEFAULT {                                \
         .clk_source                     = I2C_CLK_SRC_DEFAULT,      \
         .i2c_port                       = I2C0_MASTER_PORT,         \
-        .scl_io_num                     = I2C0_MASTER_SCL_IO,       \
-        .sda_io_num                     = I2C0_MASTER_SDA_IO,       \
+        .scl_io_num                     = CONFIG_SENSOR_SCL_GPIO,   \
+        .sda_io_num                     = CONFIG_SENSOR_SDA_GPIO,   \
         .glitch_ignore_cnt              = 7,                        \
         .flags.enable_internal_pullup   = true, }
 

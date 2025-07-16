@@ -11,8 +11,9 @@
  */
 
 #pragma once
+#include "sensor_data.h"
 #include "esp_http_client.h"
 
 
-void send_sensor_data(float lux, const char* sensor_id, const char* bearer_token);
+void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token);
 esp_err_t _http_event_handler(esp_http_client_event_t *evt);

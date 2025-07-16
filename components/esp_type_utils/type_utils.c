@@ -30,7 +30,7 @@
  *
  * Copyright (c) 2024 Eric Gionet (gionet.c.eric@gmail.com)
  *
- * MIT Licensed as described in the file LICENSE
+ * MIT Licensed as described in the file THIRD_PARTY_LICENSES
  */
 
 #include "type_utils.h"

@@ -15,7 +15,7 @@ import configparser
 Import("env")
 
 # Get the SENSOR_ENV from the shell's environment variables.
-sensor_env = os.getenv("SENSOR_ENV", "sensor_1")
+sensor_env = os.getenv("SENSOR_ENV", "sensor_2")
 
 if not sensor_env:
     print("SENSOR_ENV not set. Skipping dynamic configuration.")
@@ -44,9 +44,13 @@ if not config.has_section(sensor_env):
 
 try:
     url = config.get("all_sensors", "url")
+    sensor_set_id = config.get("all_sensors", "sensor_set_id")
     sensor_id = config.get(sensor_env, "sensor_id")
     bearer_token = config.get(sensor_env, "bearer_token")
     wifi_cred = config.get(sensor_env, "wifi_credentials")
+    sda_gpio = config.get(sensor_env, "sda_gpio")
+    scl_gpio = config.get(sensor_env, "scl_gpio")
+
 except configparser.NoOptionError as e:
     print(f"Error: Missing configuration in section '[{sensor_env}]'. {e}")
     env.Exit(1)
@@ -61,7 +65,10 @@ env.Append(
         f'-D CONFIG_SENSOR_ID=\\"{sensor_id}\\"',
         f'-D CONFIG_BEARER_TOKEN=\\"{bearer_token}\\"',
         f'-D CONFIG_WIFI_CREDENTIALS=\\"{wifi_cred}\\"',
-        f'-D CONFIG_API_URL=\\"{url}\\"'
+        f'-D CONFIG_API_URL=\\"{url}\\"',
+        f'-D CONFIG_SENSOR_SET=\\"{sensor_set_id}\\"',
+        f'-D CONFIG_SENSOR_SDA_GPIO={sda_gpio}',
+        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}'
     ]
 )
 
@@ -71,3 +78,6 @@ print(f"  - SENSOR_ID: {sensor_id}")
 print(f"  - BEARER_TOKEN: redacted")
 print(f"  - WIFI_CREDENTIALS: redacted")
 print(f"  - API_URL: {url}")
+print(f"  - SENSOR_SET: {sensor_set_id}")
+print(f"  - SDA_GPIO: {sda_gpio}")
+print(f"  - SCL_GPIO: {scl_gpio}")
