@@ -23,39 +23,9 @@
 extern const uint8_t _binary_server_cert_pem_start[];
 extern const uint8_t _binary_server_cert_pem_end[];
 
-/**
- * @brief HTTP event handler for logging. It is static to this file.
- */
-static esp_err_t http_event_handler(esp_http_client_event_t *evt)
-{
-    switch(evt->event_id) {
-    case HTTP_EVENT_ERROR:
-        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
-        break;
-    case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
-        break;
-    case HTTP_EVENT_HEADER_SENT:
-        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
-        break;
-    case HTTP_EVENT_ON_HEADER:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
-        break;
-    case HTTP_EVENT_ON_DATA:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
-        break;
-    case HTTP_EVENT_ON_FINISH:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
-        break;
-    case HTTP_EVENT_DISCONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
-        break;
-    case HTTP_EVENT_REDIRECT:
-        ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
-        break;
-    }
-    return ESP_OK;
-}
+
+// Forward declaration for safety
+esp_err_t _http_event_handler(esp_http_client_event_t *evt);
 
 // Function to send sensor data
 void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
@@ -108,7 +78,7 @@ void send_sensor_data(const sensor_reading_t* readings, int count, const char* s
     // Configure HTTP client
     esp_http_client_config_t config = {
         .url = CONFIG_API_URL,
-        .event_handler = http_event_handler,
+        .event_handler = _http_event_handler,
         .cert_pem = cert_pem,
     };
     esp_http_client_handle_t client = esp_http_client_init(&config);
@@ -135,4 +105,36 @@ void send_sensor_data(const sensor_reading_t* readings, int count, const char* s
     esp_http_client_cleanup(client);
     cJSON_Delete(root_array);
     free((void*)json_payload);
+}
+
+// HTTP event handler for logging
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+{
+    switch(evt->event_id) {
+    case HTTP_EVENT_ERROR:
+        ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
+        break;
+    case HTTP_EVENT_ON_CONNECTED:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+        break;
+    case HTTP_EVENT_HEADER_SENT:
+        ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
+        break;
+    case HTTP_EVENT_ON_HEADER:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_HEADER, key=%s, value=%s", evt->header_key, evt->header_value);
+        break;
+    case HTTP_EVENT_ON_DATA:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+        break;
+    case HTTP_EVENT_ON_FINISH:
+        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
+        break;
+    case HTTP_EVENT_DISCONNECTED:
+        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
+        break;
+    case HTTP_EVENT_REDIRECT:
+        ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
+        break;
+    }
+    return ESP_OK;
 }
