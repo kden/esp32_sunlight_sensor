@@ -31,8 +31,7 @@
  *
  * MIT Licensed as described in the file THIRD_PARTY_LICENSES
  */
-#ifndef __APP_CONFIG_H__
-#define __APP_CONFIG_H__
+#pragma once
 
 #include <stdio.h>
 #include <unistd.h>
@@ -88,4 +87,3 @@ static inline void vTaskDelaySecUntil(TickType_t *previousWakeTime, const uint s
 
 /**@}*/
 
-#endif  // __APP_CONFIG_H__
