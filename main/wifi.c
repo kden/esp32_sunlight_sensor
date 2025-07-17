@@ -105,6 +105,7 @@ static int s_num_networks = 0;
 static int s_current_network_index = 0;
 static int s_reconnect_retries = 0;
 static bool s_is_connected = false;
+static bool s_is_initialized = false;
 
 // Forward declaration
 static void try_to_connect(void);
@@ -202,25 +203,29 @@ static void try_to_connect(void)
 
 void wifi_manager_init(void)
 {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
+    // This block contains one-time initializations and should only run once.
+    if (!s_is_initialized) {
+        ESP_ERROR_CHECK(esp_netif_init());
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        esp_netif_create_default_wifi_sta();
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    parse_wifi_credentials();
+        parse_wifi_credentials();
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL))
-    ;
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+        ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
 
+        s_is_initialized = true;
+        ESP_LOGI(TAG, "Wi-Fi system initialized.");
+    }
+
+    // These functions are safe to call multiple times to start/restart the Wi-Fi connection.
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
-
-    ESP_LOGI(TAG, "Wi-Fi manager initialized.");
 }
 
 bool wifi_is_connected(void)

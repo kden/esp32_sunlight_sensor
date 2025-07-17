@@ -77,13 +77,9 @@
         .flags.enable_internal_pullup   = true, }
 
 
-extern i2c_master_bus_config_t  i2c0_bus_cfg;
-extern i2c_master_bus_handle_t  i2c0_bus_hdl;
-
 static inline void vTaskDelaySecUntil(TickType_t *previousWakeTime, const uint sec) {
     const TickType_t xFrequency = ((sec * 1000) / portTICK_PERIOD_MS);
     vTaskDelayUntil( previousWakeTime, xFrequency );
 }
 
 /**@}*/
-

@@ -15,7 +15,7 @@ import configparser
 Import("env")
 
 # Get the SENSOR_ENV from the shell's environment variables.
-sensor_env = os.getenv("SENSOR_ENV", "sensor_2")
+sensor_env = os.getenv("SENSOR_ENV", "sensor_1")
 
 if not sensor_env:
     print("SENSOR_ENV not set. Skipping dynamic configuration.")
