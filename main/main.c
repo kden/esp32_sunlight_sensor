@@ -30,104 +30,42 @@
 #include "ntp.h"
 #include "light_sensor.h"
 #include "sensor_data.h"
+#include "esp_sleep.h"
 
 #define TAG "MAIN"
 
 #define MAX_WIFI_NETWORKS 5
 #define MAX_SSID_LEN 32
 #define MAX_PASS_LEN 64
-#define BATCH_POST_INTERVAL_S (5 * 60) // 5 minutes
-#define READING_INTERVAL_S 1 // seconds
-#define READING_BUFFER_SIZE (BATCH_POST_INTERVAL_S / READING_INTERVAL_S)
+
+// Define the sleep interval in seconds for clarity
+#define DEEP_SLEEP_INTERVAL_S 15
 
 void app_main(void)
 {
+    ESP_LOGI(TAG, "Waking up from sleep...");
+
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     const i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
     ESP_ERROR_CHECK(i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl));
 
-    // Initialize the light sensor
+    // Initialize the light sensor for a single reading
     bh1750_handle_t light_sensor_hdl = NULL;
     ESP_ERROR_CHECK(init_light_sensor(i2c0_bus_hdl, &light_sensor_hdl));
 
-    // Initialize the OLED display
-    ssd1306_handle_t oled_hdl = NULL;
-    if (oled_init(i2c0_bus_hdl, &oled_hdl) != ESP_OK) {
-        ESP_LOGW(TAG, "OLED display not found or failed to initialize. Continuing without display.");
-        oled_hdl = NULL;
-    }
-    // Initialize non-volatile storage for WiFi credentials
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
+    // --- Perform one reading ---
+    float lux = 0;
+    get_ambient_light(light_sensor_hdl, &lux);
+    ESP_LOGI(TAG, "Ambient light: %.2f lux", lux);
 
-    // Initialize and start the Wi-Fi manager
-    wifi_manager_init();
+    // --- Enter Deep Sleep ---
+    // Note: We don't de-initialize peripherals. The deep sleep cycle resets them automatically.
+    ESP_LOGI(TAG, "Entering deep sleep for %d seconds.", DEEP_SLEEP_INTERVAL_S);
 
-    // Get and print the MAC address
-    char mac_address_str[18];
-    wifi_get_mac_address(mac_address_str);
-
-    char lux_str[32];
-    time_t last_post_time = 0;
-    bool sntp_initialized = false;
-    int reading_idx = 0;
-    static sensor_reading_t reading_buffer[READING_BUFFER_SIZE];
-
-    // Main loop: read and print light levels
-    while (1)
-    {
-        if (!wifi_is_connected()) {
-            ESP_LOGW(TAG, "Wi-Fi is disconnected. Waiting for automatic reconnect...");
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
-            continue;
-        }
-
-        // Initialize SNTP only once after a valid Wi-Fi connection is made.
-        if (!sntp_initialized) {
-            initialize_sntp();
-            sntp_initialized = true;
-            time(&last_post_time); // Set the initial post time to start the 5-min window
-        }
-
-        ESP_LOGI(APP_TAG, "Sensor ID (%s)", CONFIG_SENSOR_ID);
-        //ESP_LOGI(APP_TAG, "Bearer Token (%s)", CONFIG_BEARER_TOKEN);
-        //ESP_LOGI(APP_TAG, "Wifi Credentials (%s)", CONFIG_WIFI_CREDENTIALS);
-        //ESP_LOGI(TAG, "Wi-Fi MAC Address: %s", mac_address_str);
-
-        float lux = 0;
-        get_ambient_light(light_sensor_hdl, &lux);
-
-        // Update OLED monitor if it was initialized successfully
-        if (oled_hdl) {
-            display_info(oled_hdl, lux_str, lux);
-        }
-
-        // Get timestamp for the reading
-        time_t now;
-        time(&now);
-
-        // Store the reading in the buffer
-        if (reading_idx < READING_BUFFER_SIZE) {
-            reading_buffer[reading_idx].timestamp = now;
-            reading_buffer[reading_idx].lux = lux;
-            reading_idx++;
-        } else {
-            ESP_LOGW(TAG, "Reading buffer is full; skipping new reading. This may happen if the server is slow.");
-        }
-
-        // Check if it's time to send the batch
-        if (reading_idx > 0 && (now - last_post_time >= BATCH_POST_INTERVAL_S)) {
-            ESP_LOGI(TAG, "Batch interval elapsed. Sending %d readings.", reading_idx);
-            send_sensor_data(reading_buffer, reading_idx, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            last_post_time = now;
-            reading_idx = 0; // Reset buffer for the next batch
-        }
-
-        vTaskDelay(READING_INTERVAL_S * 15000 / portTICK_PERIOD_MS);
-    }
+    // Configure the timer wakeup
+    esp_sleep_enable_timer_wakeup(DEEP_SLEEP_INTERVAL_S * 1000000ULL);
+    
+    fflush(stdout); // Ensure all log messages are printed before sleep
+    esp_deep_sleep_start();
 }
