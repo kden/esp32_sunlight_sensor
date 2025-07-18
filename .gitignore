@@ -9,5 +9,6 @@ dumpwifi.sh
 *.proj.*
 sdkconfig.dynamic_sensor
 sdkconfig
+sdkconfig.test
 out
 **/*.pem

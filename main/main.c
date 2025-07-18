@@ -10,6 +10,11 @@
  * Apache 2.0 Licensed as described in the file LICENSE
  */
 
+// This preprocessor directive ensures that the contents of this file are only
+// compiled when not running a unit test, preventing the "multiple definition
+// of app_main" linker error.
+#ifndef PIO_UNIT_TESTING
+
 #include <stdio.h>
 #include <esp_log.h>
 #include <string.h>
@@ -96,3 +101,5 @@ void app_main(void)
     // The main task has nothing else to do, so it can be deleted.
     // vTaskDelete(NULL); // Or just let it exit.
 }
+
+#endif // PIO_UNIT_TESTING
