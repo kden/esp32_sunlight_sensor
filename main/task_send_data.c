@@ -59,14 +59,17 @@ void task_send_data(void *arg) {
 
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
+        send_status_update("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
         initialize_sntp();
         log_system_time();
+        send_status_update("ntp set", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
     } else {
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi for initial NTP sync. Timestamps may be incorrect until next cycle.");
     }
 
-    time_t last_send_time = 0; // Set to 0 to trigger an immediate first send cycle
-    time_t last_ntp_sync_time = 0;
+    time_t last_send_time;
+    time(&last_send_time); // Initialize with current time to start a full 5-minute cycle
+    time_t last_ntp_sync_time;
     time(&last_ntp_sync_time); // Set initial sync time
 
     while (1) {
