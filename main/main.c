@@ -1,7 +1,7 @@
 /**
 * @file main.c
  *
- * ESP-IDF application to read and display ambient light levels using the BH1750 sensor.
+ * ESP-IDF application to read and send ambient light levels using the BH1750 sensor.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *

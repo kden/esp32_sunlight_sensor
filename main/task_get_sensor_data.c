@@ -1,3 +1,15 @@
+/**
+* @file task_get_sensor_data.c
+ *
+ * Retrieve data from sensor and write to buffer.
+ *
+ * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
+ *
+ * Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
+ *
+ * Apache 2.0 Licensed as described in the file LICENSE
+ */
+
 #include "task_get_sensor_data.h"
 #include "app_context.h"
 #include "light_sensor.h"
