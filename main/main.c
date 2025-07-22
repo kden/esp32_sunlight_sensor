@@ -29,6 +29,8 @@
 #include "light_sensor.h"
 #include "sensor_data.h"
 #include "app_context.h"
+#include "crash_handler.h"
+#include "task_keepalive_blink.h"
 
 #define TAG "MAIN"
 
@@ -55,14 +57,21 @@ void app_main(void)
     bh1750_handle_t light_sensor_hdl = NULL;
     ESP_ERROR_CHECK(init_light_sensor(i2c0_bus_hdl, &light_sensor_hdl));
 
-    // Initialize non-volatile storage for WiFi credentials
+    // Initialize non-volatile storage.
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
-    
+
+    // Check if the last reset was due to a crash and report it.
+    check_and_report_crash();
+
+    // Initialize the keep-alive blink task only if a valid GPIO is configured.
+    if (CONFIG_KEEPALIVE_LED_GPIO >= 0) {
+        init_keepalive_blink_task();
+    }
 
     // Create the application context to share resources with tasks
     app_context_t *app_context = malloc(sizeof(app_context_t));
@@ -91,7 +100,7 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(10000));
     xTaskCreate(task_get_sensor_data, "sensor_task", 4096, app_context, 5, NULL);
 
-    
+
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
     // The main task has nothing else to do, so it can be deleted.
     // vTaskDelete(NULL); // Or just let it exit.

@@ -45,11 +45,15 @@ if not config.has_section(sensor_env):
 try:
     url = config.get("all_sensors", "url")
     sensor_set_id = config.get("all_sensors", "sensor_set_id")
+    # Read the new power_drain setting, defaulting to "low" if not present
+    power_drain = config.get("all_sensors", "power_drain", fallback="low")
     sensor_id = config.get(sensor_env, "sensor_id")
     bearer_token = config.get(sensor_env, "bearer_token")
     wifi_cred = config.get(sensor_env, "wifi_credentials")
     sda_gpio = config.get(sensor_env, "sda_gpio")
     scl_gpio = config.get(sensor_env, "scl_gpio")
+    # Read the keepalive_led_gpio from the sensor-specific section, defaulting to -1 (disabled)
+    keepalive_led_gpio = config.get(sensor_env, "keepalive_led_gpio", fallback="-1")
 
 except configparser.NoOptionError as e:
     print(f"Error: Missing configuration in section '[{sensor_env}]'. {e}")
@@ -68,7 +72,9 @@ env.Append(
         f'-D CONFIG_API_URL=\\"{url}\\"',
         f'-D CONFIG_SENSOR_SET=\\"{sensor_set_id}\\"',
         f'-D CONFIG_SENSOR_SDA_GPIO={sda_gpio}',
-        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}'
+        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}',
+        f'-D CONFIG_SENSOR_POWER_DRAIN=\\"{power_drain}\\"',
+        f'-D CONFIG_KEEPALIVE_LED_GPIO={keepalive_led_gpio}'
     ]
 )
 
@@ -81,3 +87,5 @@ print(f"  - API_URL: {url}")
 print(f"  - SENSOR_SET: {sensor_set_id}")
 print(f"  - SDA_GPIO: {sda_gpio}")
 print(f"  - SCL_GPIO: {scl_gpio}")
+print(f"  - POWER_DRAIN: {power_drain}")
+print(f"  - KEEPALIVE_LED_GPIO: {keepalive_led_gpio}")

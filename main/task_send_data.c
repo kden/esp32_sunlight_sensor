@@ -20,6 +20,7 @@
 #include "sdkconfig.h"
 #include <stdlib.h>
 #include <time.h>
+#include <string.h> // Required for strcmp
 
 #define TAG "SEND_DATA_TASK"
 
@@ -71,7 +72,15 @@ void task_send_data(void *arg) {
 
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
-        send_status_update("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        wifi_config_t wifi_config;
+        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
+            char status_msg[64];
+            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s", (char *)wifi_config.sta.ssid);
+            send_status_update(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        } else {
+            ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
+            send_status_update("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        }
         initialize_sntp();
         log_system_time();
         send_status_update("ntp set", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
@@ -129,9 +138,14 @@ void task_send_data(void *arg) {
                     ESP_LOGI(TAG, "No new readings to send.");
                 }
 
-                esp_wifi_disconnect();
-                esp_wifi_stop();
-                ESP_LOGI(TAG, "Wi-Fi disconnected to save power.");
+                // Conditionally disconnect based on power drain setting
+                if (strcmp(CONFIG_SENSOR_POWER_DRAIN, "high") != 0) {
+                    esp_wifi_disconnect();
+                    esp_wifi_stop();
+                    ESP_LOGI(TAG, "Wi-Fi disconnected to save power (power_drain: %s).", CONFIG_SENSOR_POWER_DRAIN);
+                } else {
+                    ESP_LOGI(TAG, "Keeping Wi-Fi connected (power_drain: high).");
+                }
             } else {
                 ESP_LOGE(TAG, "Failed to connect to Wi-Fi. Will retry in %d minutes.", DATA_SEND_INTERVAL_MINUTES);
             }

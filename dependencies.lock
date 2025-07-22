@@ -10,6 +10,6 @@ dependencies:
       path: /home/caden/code/esp32_sunlight_sensor
       type: local
     version: '*'
-manifest_hash: d2cdf17f7e0bdfebab26ace31cdccd153d8111e383a7fa514ab8f0205d84fe3f
+manifest_hash: 56d9506356ae1fab608ad41502c2e08478d84ddeb43f92df33b48f872b61adbc
 target: esp32s3
 version: 1.0.0
