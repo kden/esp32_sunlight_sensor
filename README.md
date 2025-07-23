@@ -24,6 +24,8 @@ This is my first embedded software project, so there was a lot to learn.  I deci
 
 I chose to use ESP-IDF rather than Arduino-style C++ or one of the Python platforms for embedded programming because I wanted to demonstrate that I can still program in C, and I wanted to see if ESP-IDF does a better job at leveraging the ESP32's features than the Arduino libraries.
 
+This is part of the [Sunlight Sensor project in my portfolio](https://kden.github.io/sunlight-sensor/).  You can see more details about the hardware used and other components of the project there.
+
 ## Getting Started
 
 ### Prerequisites
