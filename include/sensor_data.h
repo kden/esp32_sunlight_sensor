@@ -1,5 +1,5 @@
 /**
- * @file sensor_data.h
+* @file sensor_data.h
  *
  * Data structures for sensor readings.
  *

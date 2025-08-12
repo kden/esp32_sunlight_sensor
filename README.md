@@ -11,6 +11,7 @@
   - [Installation](#installation)
 - [Usage](#usage)
 - [Options](#options)
+- [Unit Tests](#unit-tests)
 - [Acknowledgements](#acknowledgements)
 - [License](#license)
 
@@ -178,6 +179,17 @@ Under each sensor configuration:
 - `sda_gpio`: Pin number used for SDA GPIO (8 for the ESP32-S3-DevKitC-1U-N8)
 - `scl_gpio`: Pin number used for SCL GPIO (9 for the ESP32-S3-DevKitC-1U-N8) 
 - `keepalive_led_gpio`: Optional value for some ESP development boards with an onboard LED. (48 for the ESP32-S3-DevKitC-1U-N8.)  If the pin of the LED is provided,  the LED will flash about every 5 seconds.  This is another experiment to try if you are trying to keep your battery pack alive, if you use an off-the-shelf USB battery pack with automatic shutoff. 
+
+
+## Unit Tests
+
+The `Makefile` exists only turn pure-C unit tests located in the test folder.  Mocking out all of the necessary parts of the ESP-IDF framework for unit testing is extremely complicated and can quickly become brittle.  The existing test, `test_data_sender_core.c` runs tests on the business logic in `data_sender_core.c` code which has been abstracted away from the ESP-IDF framework.
+
+You can run the tests with:
+
+```
+make test
+```
 
 ## Acknowledgments
 
