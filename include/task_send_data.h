@@ -12,4 +12,12 @@
 
 #pragma once
 
+#include "app_context.h" // For app_context_t
+#include <time.h>         // For time_t
+
 void task_send_data(void *arg);
+
+#ifdef TEST
+// This function is only compiled for testing environments
+void process_data_send_cycle(app_context_t *context, time_t now, time_t *last_ntp_sync_time);
+#endif

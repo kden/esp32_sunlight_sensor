@@ -61,8 +61,9 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
  * @brief Private helper to send a pre-formatted JSON payload.
  * This function handles the entire HTTP client lifecycle.
  * It is declared with __attribute__((weak)) so it can be easily mocked in tests.
+ * @return ESP_OK on success, ESP_FAIL on server error, or other error codes.
  */
-void __attribute__((weak)) _send_json_payload(const char* json_payload, const char* bearer_token) {
+esp_err_t __attribute__((weak)) _send_json_payload(const char* json_payload, const char* bearer_token) {
     esp_http_client_handle_t client = NULL;
     esp_err_t err = ESP_FAIL;
 
@@ -76,7 +77,7 @@ void __attribute__((weak)) _send_json_payload(const char* json_payload, const ch
     client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "Failed to initialize HTTP client");
-        return; // No cleanup needed here
+        return ESP_FAIL;
     }
 
     esp_http_client_set_method(client, HTTP_METHOD_POST);
@@ -88,19 +89,27 @@ void __attribute__((weak)) _send_json_payload(const char* json_payload, const ch
 
     err = esp_http_client_perform(client);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTPS POST request sent successfully, status = %d", esp_http_client_get_status_code(client));
+        int status_code = esp_http_client_get_status_code(client);
+        ESP_LOGI(TAG, "HTTPS POST request sent, status = %d", status_code);
+        // Consider any 2xx status code as success
+        if (status_code < 200 || status_code >= 300) {
+            ESP_LOGE(TAG, "Server returned non-success status code: %d", status_code);
+            err = ESP_FAIL; // Treat non-2xx as a failure for retry purposes
+        }
     } else {
         ESP_LOGE(TAG, "HTTPS POST request failed: %s", esp_err_to_name(err));
     }
 
     esp_http_client_cleanup(client);
+    return err;
 }
 
 
 // Function to send sensor data
-void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
+esp_err_t send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
     cJSON *root_array = NULL;
     char *json_payload = NULL;
+    esp_err_t err = ESP_FAIL;
 
     root_array = cJSON_CreateArray();
     if (root_array == NULL) {
@@ -128,6 +137,7 @@ void send_sensor_data(const sensor_reading_t* readings, int count, const char* s
 
     if (cJSON_GetArraySize(root_array) == 0) {
         ESP_LOGW(TAG, "No valid readings to send. Aborting HTTP POST.");
+        err = ESP_OK; // Not a failure, just nothing to do
         goto cleanup;
     }
 
@@ -140,11 +150,12 @@ void send_sensor_data(const sensor_reading_t* readings, int count, const char* s
     ESP_LOGD(TAG, "JSON Payload: %s", json_payload);
     ESP_LOGI(TAG, "Sending JSON with %d records.", cJSON_GetArraySize(root_array));
 
-    _send_json_payload(json_payload, bearer_token);
+    err = _send_json_payload(json_payload, bearer_token);
 
 cleanup:
     if (root_array) cJSON_Delete(root_array);
     if (json_payload) free(json_payload);
+    return err;
 }
 
 void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
