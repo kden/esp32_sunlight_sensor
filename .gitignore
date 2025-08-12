@@ -11,3 +11,5 @@ sdkconfig.dynamic_sensor
 sdkconfig
 out
 **/*.pem
+test_core
+test-results.xml
