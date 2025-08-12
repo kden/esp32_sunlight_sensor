@@ -160,7 +160,14 @@ cleanup:
 
 void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
     cJSON *root_array = NULL;
+    cJSON *status_object = NULL;
     char *json_payload = NULL;
+
+    // Validate input parameters
+    if (!status_message || !sensor_id || !bearer_token) {
+        ESP_LOGE(TAG, "Invalid parameters for status update");
+        return;
+    }
 
     root_array = cJSON_CreateArray();
     if (root_array == NULL) {
@@ -168,7 +175,7 @@ void send_status_update(const char* status_message, const char* sensor_id, const
         goto cleanup;
     }
 
-    cJSON *status_object = cJSON_CreateObject();
+    status_object = cJSON_CreateObject();
     if (status_object == NULL) {
         ESP_LOGE(TAG, "Failed to create status object");
         goto cleanup;
@@ -179,12 +186,18 @@ void send_status_update(const char* status_message, const char* sensor_id, const
     char timestamp_str[32];
     strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
 
-    cJSON_AddStringToObject(status_object, "sensor_id", sensor_id);
-    cJSON_AddStringToObject(status_object, "timestamp", timestamp_str);
-    cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET);
-    cJSON_AddStringToObject(status_object, "status", status_message);
+    // Add all fields and check for failures
+    if (!cJSON_AddStringToObject(status_object, "sensor_id", sensor_id) ||
+        !cJSON_AddStringToObject(status_object, "timestamp", timestamp_str) ||
+        !cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET) ||
+        !cJSON_AddStringToObject(status_object, "status", status_message)) {
+        ESP_LOGE(TAG, "Failed to add fields to status object");
+        goto cleanup;
+    }
 
+    // Add to array
     cJSON_AddItemToArray(root_array, status_object);
+    status_object = NULL; // Array now owns this object
 
     json_payload = cJSON_Print(root_array);
     if (json_payload == NULL) {
@@ -198,6 +211,17 @@ void send_status_update(const char* status_message, const char* sensor_id, const
     _send_json_payload(json_payload, bearer_token);
 
 cleanup:
-    if (root_array) cJSON_Delete(root_array);
-    if (json_payload) free(json_payload);
+    // Clean up in reverse order
+    if (json_payload) {
+        free(json_payload);
+        json_payload = NULL;
+    }
+    if (status_object) {
+        cJSON_Delete(status_object);
+        status_object = NULL;
+    }
+    if (root_array) {
+        cJSON_Delete(root_array);
+        root_array = NULL;
+    }
 }

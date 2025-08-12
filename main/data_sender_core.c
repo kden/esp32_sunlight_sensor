@@ -1,7 +1,8 @@
 /**
  * @file data_sender_core.c
  *
- * Pure business logic implementation - easily testable
+ * Pure business logic for data sending with no ESP-IDF dependencies
+ * Keep it this way for unit testing
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
@@ -94,12 +95,25 @@ send_result_t process_data_send_cycle(
 }
 
 void add_readings_to_buffer(reading_buffer_t* buffer, const reading_t* new_readings, int count) {
-    if (count <= 0 || !buffer || !new_readings) {
+    if (count <= 0 || !buffer || !new_readings || !buffer->buffer) {
+        printf("  [ERROR] Invalid parameters for add_readings_to_buffer\n");
+        return;
+    }
+
+    if (buffer->capacity <= 0) {
+        printf("  [ERROR] Buffer capacity is invalid: %d\n", buffer->capacity);
         return;
     }
 
     printf("  [DEBUG] Adding %d readings to buffer (current count: %d, capacity: %d)\n",
            count, buffer->count, buffer->capacity);
+
+    // Sanity check current buffer state
+    if (buffer->count < 0 || buffer->count > buffer->capacity) {
+        printf("  [ERROR] Buffer in invalid state: count=%d, capacity=%d\n",
+               buffer->count, buffer->capacity);
+        buffer->count = 0; // Reset to safe state
+    }
 
     // Handle overflow by dropping oldest readings
     if (buffer->count + count > buffer->capacity) {
@@ -116,10 +130,15 @@ void add_readings_to_buffer(reading_buffer_t* buffer, const reading_t* new_readi
             int keep_count = buffer->count - overflow;
             printf("  [DEBUG] Keeping %d existing readings, shifting left by %d\n", keep_count, overflow);
 
-            memmove(&buffer->buffer[0],
-                   &buffer->buffer[overflow],
-                   keep_count * sizeof(reading_t));
-            buffer->count = keep_count;
+            // Bounds check before memmove
+            if (keep_count > 0 && overflow < buffer->count) {
+                memmove(&buffer->buffer[0],
+                       &buffer->buffer[overflow],
+                       keep_count * sizeof(reading_t));
+                buffer->count = keep_count;
+            } else {
+                buffer->count = 0;
+            }
         }
     }
 
@@ -130,13 +149,20 @@ void add_readings_to_buffer(reading_buffer_t* buffer, const reading_t* new_readi
         count = can_add;
     }
 
-    if (count > 0) {
+    if (count > 0 && buffer->count + count <= buffer->capacity) {
         printf("  [DEBUG] Copying %d readings to position %d\n", count, buffer->count);
         memcpy(&buffer->buffer[buffer->count], new_readings, count * sizeof(reading_t));
         buffer->count += count;
     }
 
     printf("  [DEBUG] Final buffer count: %d\n", buffer->count);
+
+    // Final sanity check
+    if (buffer->count < 0 || buffer->count > buffer->capacity) {
+        printf("  [ERROR] Buffer corrupted after operation: count=%d, capacity=%d\n",
+               buffer->count, buffer->capacity);
+        buffer->count = 0; // Reset to safe state
+    }
 }
 
 bool should_send_data(time_t last_send, time_t now, int interval_seconds) {
@@ -144,15 +170,28 @@ bool should_send_data(time_t last_send, time_t now, int interval_seconds) {
 }
 
 void init_reading_buffer(reading_buffer_t* buffer, reading_t* storage, int capacity) {
+    if (!buffer || !storage || capacity <= 0) {
+        printf("  [ERROR] Invalid parameters for init_reading_buffer\n");
+        return;
+    }
+
     buffer->buffer = storage;
     buffer->capacity = capacity;
     buffer->count = 0;
 }
 
 void clear_reading_buffer(reading_buffer_t* buffer) {
+    if (!buffer) {
+        printf("  [ERROR] Null buffer passed to clear_reading_buffer\n");
+        return;
+    }
     buffer->count = 0;
 }
 
 int get_reading_count(const reading_buffer_t* buffer) {
+    if (!buffer) {
+        printf("  [ERROR] Null buffer passed to get_reading_count\n");
+        return 0;
+    }
     return buffer->count;
 }

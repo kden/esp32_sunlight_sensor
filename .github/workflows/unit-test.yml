@@ -19,23 +19,52 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc make
 
-      - name: Run unit tests
+      - name: Run unit tests with Makefile
         run: |
-          gcc -I include/ main/data_sender_core.c test/test_data_sender_core.c -o test_core
-          ./test_core test-results.xml
+          make test-xml
 
-      - name: Publish test results
+      - name: Publish Data Sender test results
         uses: dorny/test-reporter@v1
         if: always()  # Run even if tests fail
         with:
-          name: Unit Test Results
-          path: test-results.xml
+          name: Data Sender Core Test Results
+          path: test-results-data-sender.xml
           reporter: java-junit
-          fail-on-error: true
+          fail-on-error: false  # Don't fail the job, let both test suites run
 
-      - name: Upload test results
+      - name: Publish Sensor Buffer test results
+        uses: dorny/test-reporter@v1
+        if: always()  # Run even if tests fail
+        with:
+          name: Sensor Buffer Core Test Results
+          path: test-results-sensor-buffer.xml
+          reporter: java-junit
+          fail-on-error: false  # Don't fail the job, let both test suites run
+
+      - name: Upload all test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: test-results
-          path: test-results.xml
+          path: |
+            test-results-data-sender.xml
+            test-results-sensor-buffer.xml
+
+      - name: Check if any tests failed
+        run: |
+          # Check if either test suite had failures
+          data_sender_failures=$(grep -o 'failures="[0-9]*"' test-results-data-sender.xml | grep -o '[0-9]*' || echo "0")
+          sensor_buffer_failures=$(grep -o 'failures="[0-9]*"' test-results-sensor-buffer.xml | grep -o '[0-9]*' || echo "0")
+          
+          total_failures=$((data_sender_failures + sensor_buffer_failures))
+          
+          echo "Data Sender failures: $data_sender_failures"
+          echo "Sensor Buffer failures: $sensor_buffer_failures"
+          echo "Total failures: $total_failures"
+          
+          if [ $total_failures -gt 0 ]; then
+            echo "❌ $total_failures test(s) failed overall"
+            exit 1
+          else
+            echo "✅ All tests passed!"
+          fi

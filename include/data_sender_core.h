@@ -1,8 +1,8 @@
 /**
 * @file data_sender_core.h
  *
- * Pure business logic for data sending - no ESP-IDF dependencies
- * This can be easily unit tested with standard tools
+ * Pure business logic for data sending with no ESP-IDF dependencies
+ * Keep it this way for unit testing
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *

@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
- * Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
+ * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
@@ -95,11 +95,12 @@ void app_main(void)
 
     // Create and launch the tasks
     // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 4096, app_context, 5, NULL);
+    // Increased stack size from 4096 to 8192
+    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);
     // Give the send_data_task time to connect and perform the initial NTP sync
     vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 4096, app_context, 5, NULL);
-
+    // Increased stack size from 4096 to 8192
+    xTaskCreate(task_get_sensor_data, "sensor_task", 8192, app_context, 5, NULL);
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
     // The main task has nothing else to do, so it can be deleted.

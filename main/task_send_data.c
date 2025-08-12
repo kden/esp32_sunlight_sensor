@@ -1,10 +1,14 @@
 /**
- * @file task_send_data.c
+* @file task_send_data.c
  *
  * ESP-IDF task for sending buffered data to sensor API.
  * Clean version with no conditional compilation.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
+ *
+ * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
+ *
+ * Apache 2.0 Licensed as described in the file LICENSE
  */
 
 #include "task_send_data.h"
@@ -19,6 +23,7 @@
 #include <time.h>
 #include <string.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #define TAG "SEND_DATA_TASK"
 
@@ -32,6 +37,11 @@ static int g_unsent_readings_count = 0;
 
 // Conversion helpers between ESP-IDF types and pure business logic types
 static void convert_to_pure_readings(const sensor_reading_t* esp_readings, int count, reading_t* pure_readings) {
+    if (!esp_readings || !pure_readings || count <= 0) {
+        ESP_LOGE(TAG, "Invalid parameters for convert_to_pure_readings");
+        return;
+    }
+
     for (int i = 0; i < count; i++) {
         pure_readings[i].timestamp = esp_readings[i].timestamp;
         pure_readings[i].lux = esp_readings[i].lux;
@@ -39,6 +49,11 @@ static void convert_to_pure_readings(const sensor_reading_t* esp_readings, int c
 }
 
 static void convert_from_pure_readings(const reading_t* pure_readings, int count, sensor_reading_t* esp_readings) {
+    if (!pure_readings || !esp_readings || count <= 0) {
+        ESP_LOGE(TAG, "Invalid parameters for convert_from_pure_readings");
+        return;
+    }
+
     for (int i = 0; i < count; i++) {
         esp_readings[i].timestamp = pure_readings[i].timestamp;
         esp_readings[i].lux = pure_readings[i].lux;
@@ -64,11 +79,22 @@ static void esp_disconnect_network(void) {
 }
 
 static bool esp_send_data(const reading_t* readings, int count) {
-    // Convert to ESP-IDF format and send
-    sensor_reading_t esp_readings[count];
-    convert_from_pure_readings(readings, count, esp_readings);
+    if (!readings || count <= 0) {
+        ESP_LOGE(TAG, "Invalid parameters for esp_send_data");
+        return false;
+    }
 
+    // Allocate on heap to avoid stack overflow for large counts
+    sensor_reading_t* esp_readings = malloc(count * sizeof(sensor_reading_t));
+    if (!esp_readings) {
+        ESP_LOGE(TAG, "Failed to allocate memory for ESP readings conversion");
+        return false;
+    }
+
+    convert_from_pure_readings(readings, count, esp_readings);
     esp_err_t result = send_sensor_data(esp_readings, count, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+
+    free(esp_readings);
     return result == ESP_OK;
 }
 
@@ -77,6 +103,13 @@ static bool esp_should_sync_time(time_t last_sync, time_t now) {
 }
 
 static void esp_sync_time(void) {
+    // Check if SNTP is already running and stop it first
+    if (esp_sntp_enabled()) {
+        ESP_LOGI(TAG, "SNTP already running, stopping first");
+        esp_sntp_stop();
+        vTaskDelay(pdMS_TO_TICKS(100)); // Small delay to ensure cleanup
+    }
+
     initialize_sntp();
 
     // Log time after sync
@@ -105,6 +138,10 @@ static power_mode_t esp_get_power_mode(void) {
 }
 
 static void esp_log_message(const char* level, const char* message) {
+    if (!level || !message) {
+        return;
+    }
+
     if (strcmp(level, "INFO") == 0) {
         ESP_LOGI(TAG, "%s", message);
     } else if (strcmp(level, "ERROR") == 0) {
@@ -126,38 +163,129 @@ static const network_interface_t esp_network_interface = {
     .log_message = esp_log_message
 };
 
-// Helper to send status updates
+// Helper to send status updates - with better error handling and delays
 static void send_startup_status_updates(void) {
-    if (wifi_is_connected()) {
+    if (!wifi_is_connected()) {
+        ESP_LOGW(TAG, "Cannot send status updates - wifi not connected");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Sending startup status updates...");
+
+    // Add longer delay to let network fully stabilize
+    vTaskDelay(pdMS_TO_TICKS(5000)); // 5 seconds instead of 2
+
+    // First status update with retry logic
+    bool wifi_status_sent = false;
+    for (int retry = 0; retry < 3 && !wifi_status_sent; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "Retrying wifi status update (attempt %d/3)", retry + 1);
+            vTaskDelay(pdMS_TO_TICKS(2000)); // 2 second delay between retries
+        }
+
         wifi_config_t wifi_config;
         if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
             char status_msg[64];
-            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s", (char *)wifi_config.sta.ssid);
-            send_status_update(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            int written = snprintf(status_msg, sizeof(status_msg), "wifi connected to %s", (char *)wifi_config.sta.ssid);
+            if (written >= 0 && written < sizeof(status_msg)) {
+                send_status_update(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                wifi_status_sent = true;
+                ESP_LOGI(TAG, "WiFi status update sent successfully");
+            } else {
+                ESP_LOGW(TAG, "Status message too long, trying generic message");
+                send_status_update("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                wifi_status_sent = true;
+            }
         } else {
             send_status_update("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            wifi_status_sent = true;
         }
-        send_status_update("ntp set", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
     }
+
+    if (!wifi_status_sent) {
+        ESP_LOGE(TAG, "Failed to send WiFi status after 3 attempts - continuing anyway");
+    }
+
+    // Longer delay between status updates
+    vTaskDelay(pdMS_TO_TICKS(3000)); // 3 seconds between status updates
+
+    // Second status update with retry logic
+    bool ntp_status_sent = false;
+    for (int retry = 0; retry < 3 && !ntp_status_sent; retry++) {
+        if (retry > 0) {
+            ESP_LOGW(TAG, "Retrying NTP status update (attempt %d/3)", retry + 1);
+            vTaskDelay(pdMS_TO_TICKS(2000));
+        }
+
+        send_status_update("ntp set", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        ntp_status_sent = true;
+        ESP_LOGI(TAG, "NTP status update sent successfully");
+    }
+
+    if (!ntp_status_sent) {
+        ESP_LOGE(TAG, "Failed to send NTP status after 3 attempts - continuing anyway");
+    }
+
+    ESP_LOGI(TAG, "Startup status updates completed");
 }
 
 void task_send_data(void *arg) {
     app_context_t *context = (app_context_t *)arg;
 
+    if (!context) {
+        ESP_LOGE(TAG, "Invalid context passed to task_send_data");
+        vTaskDelete(NULL);
+        return;
+    }
+
     ESP_LOGI(TAG, "Data sending task started. Performing initial setup...");
+
+    // Check available heap before proceeding
+    uint32_t free_heap = esp_get_free_heap_size();
+    ESP_LOGI(TAG, "Free heap at start: %" PRIu32 " bytes", free_heap);
+
+    if (free_heap < 50000) { // Less than 50KB free
+        ESP_LOGW(TAG, "Low heap memory detected: %" PRIu32 " bytes", free_heap);
+    }
 
     // Initial network connection and time sync
     esp_connect_network();
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Initial network connection successful");
         esp_sync_time();
-        send_startup_status_updates();
+
+        // Only send status updates if we have enough heap
+        uint32_t heap_after_sync = esp_get_free_heap_size();
+        ESP_LOGI(TAG, "Free heap after sync: %" PRIu32 " bytes", heap_after_sync);
+
+        if (heap_after_sync > 30000) { // Only if we have >30KB free
+            send_startup_status_updates();
+        } else {
+            ESP_LOGW(TAG, "Skipping status updates due to low heap: %" PRIu32 " bytes", heap_after_sync);
+        }
     } else {
         ESP_LOGE(TAG, "Failed initial network connection. Will retry on first send cycle.");
     }
 
-    // Initialize pure business logic buffers
-    reading_t unsent_storage[UNSENT_BUFFER_SIZE];
+    // Pre-allocate buffers to avoid repeated malloc/free
+    reading_t* unsent_storage = malloc(UNSENT_BUFFER_SIZE * sizeof(reading_t));
+    if (!unsent_storage) {
+        ESP_LOGE(TAG, "Failed to allocate unsent storage buffer");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // Pre-allocate current readings buffer to avoid malloc in loop
+    reading_t* current_storage = malloc(context->buffer_size * sizeof(reading_t));
+    if (!current_storage) {
+        ESP_LOGE(TAG, "Failed to allocate current storage buffer");
+        free(unsent_storage);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Pre-allocated buffers. Free heap: %" PRIu32 " bytes", esp_get_free_heap_size());
+
     reading_buffer_t unsent_buffer;
     init_reading_buffer(&unsent_buffer, unsent_storage, UNSENT_BUFFER_SIZE);
 
@@ -165,6 +293,9 @@ void task_send_data(void *arg) {
     time(&last_send_time);
     time_t last_ntp_sync_time;
     time(&last_ntp_sync_time);
+
+    // Heap monitoring counter
+    int heap_check_counter = 0;
 
     while (1) {
         time_t now;
@@ -174,24 +305,49 @@ void task_send_data(void *arg) {
         if (should_send_data(last_send_time, now, DATA_SEND_INTERVAL_S)) {
             ESP_LOGI(TAG, "Data send interval reached. Processing send cycle...");
 
-            // Get current readings from shared buffer (ESP-IDF specific)
-            reading_t current_storage[context->buffer_size];
+            // Reuse pre-allocated buffer instead of malloc/free each time
             reading_buffer_t current_buffer;
             init_reading_buffer(&current_buffer, current_storage, context->buffer_size);
 
+            // Get current readings from shared buffer (ESP-IDF specific)
             if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
                 if (*(context->reading_idx) > 0) {
+                    // Bounds check
+                    int readings_to_copy = *(context->reading_idx);
+                    if (readings_to_copy > context->buffer_size) {
+                        ESP_LOGW(TAG, "Reading index exceeds buffer size, clamping");
+                        readings_to_copy = context->buffer_size;
+                    }
+
                     // Convert ESP-IDF readings to pure business logic format
-                    convert_to_pure_readings(context->reading_buffer, *(context->reading_idx), current_storage);
-                    current_buffer.count = *(context->reading_idx);
+                    convert_to_pure_readings(context->reading_buffer, readings_to_copy, current_storage);
+                    current_buffer.count = readings_to_copy;
                     *(context->reading_idx) = 0; // Clear the shared buffer
                 }
                 xSemaphoreGive(context->buffer_mutex);
+            } else {
+                ESP_LOGE(TAG, "Failed to take buffer mutex");
+                continue; // Skip this cycle
             }
 
-            // Convert unsent readings to pure format
-            reading_t temp_unsent[UNSENT_BUFFER_SIZE];
-            convert_to_pure_readings(g_unsent_readings_storage, g_unsent_readings_count, temp_unsent);
+            // Convert unsent readings to pure format (with bounds checking)
+            reading_t* temp_unsent = malloc(UNSENT_BUFFER_SIZE * sizeof(reading_t));
+            if (!temp_unsent) {
+                ESP_LOGE(TAG, "Failed to allocate temp unsent buffer");
+                continue; // Skip this cycle
+            }
+
+            // Bounds check for unsent readings
+            if (g_unsent_readings_count > UNSENT_BUFFER_SIZE) {
+                ESP_LOGW(TAG, "Unsent readings count exceeds buffer size, clamping");
+                g_unsent_readings_count = UNSENT_BUFFER_SIZE;
+            }
+
+            if (g_unsent_readings_count > 0) {
+                convert_to_pure_readings(g_unsent_readings_storage, g_unsent_readings_count, temp_unsent);
+            }
+
+            // Re-initialize unsent buffer with current data
             init_reading_buffer(&unsent_buffer, temp_unsent, UNSENT_BUFFER_SIZE);
             unsent_buffer.count = g_unsent_readings_count;
 
@@ -204,8 +360,15 @@ void task_send_data(void *arg) {
                 &esp_network_interface
             );
 
-            // Convert back and update unsent storage
-            convert_from_pure_readings(unsent_buffer.buffer, unsent_buffer.count, g_unsent_readings_storage);
+            // Convert back and update unsent storage (with bounds checking)
+            if (unsent_buffer.count > UNSENT_BUFFER_SIZE) {
+                ESP_LOGW(TAG, "Unsent buffer count exceeds storage size, clamping");
+                unsent_buffer.count = UNSENT_BUFFER_SIZE;
+            }
+
+            if (unsent_buffer.count > 0) {
+                convert_from_pure_readings(unsent_buffer.buffer, unsent_buffer.count, g_unsent_readings_storage);
+            }
             g_unsent_readings_count = unsent_buffer.count;
 
             // Log result
@@ -225,9 +388,22 @@ void task_send_data(void *arg) {
             }
 
             last_send_time = now;
+
+            // Clean up temp buffer
+            free(temp_unsent);
+        }
+
+        // Periodic heap monitoring
+        if (++heap_check_counter >= 10) { // Every 10 cycles (5 minutes)
+            ESP_LOGI(TAG, "Free heap: %" PRIu32 " bytes", esp_get_free_heap_size());
+            heap_check_counter = 0;
         }
 
         // Sleep until next check
         vTaskDelay(pdMS_TO_TICKS(30000)); // Check every 30 seconds
     }
+
+    // This should never be reached, but clean up if it is
+    free(current_storage);
+    free(unsent_storage);
 }

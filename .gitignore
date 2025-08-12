@@ -13,3 +13,7 @@ out
 **/*.pem
 test_core
 test-results.xml
+/test-results-data-sender.xml
+/test-results-sensor-buffer.xml
+/test_data_sender_core
+/test_sensor_buffer_core

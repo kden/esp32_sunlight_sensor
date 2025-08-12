@@ -1,7 +1,8 @@
 /**
 * @file sensor_data.h
  *
- * Data structures for sensor readings.
+ * Data structures for sensor readings with no ESP-IDF dependencies
+ * Keep it this way for unit testing
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
