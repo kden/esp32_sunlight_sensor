@@ -169,7 +169,6 @@ In the `[all_sensors]` section:
 
 - `url`: the URL of the web service where your sensor sends data
 - `sensor_set_id`: each location, for example each area of land which will be blanketed with sensors, gets its own sensor_set_id.  I've only tested this with simple IDs with no spaces.
-- `power_drain`: this can be "high" or "low".  This is for experimenting with how much power it takes to keep your battery pack alive, if you use an off-the-shelf USB battery pack with automatic shutoff.  "high" means that it never turns off the WiFi.  "low" means that the WiFi turns off between sends.
 
 Under each sensor configuration:
 
@@ -177,7 +176,6 @@ Under each sensor configuration:
 - `wifi_credentials`: one or more SSIDs and passwords separated by a colon.  Each pair can be separated by a semicolon, like `SSID:Password;SSID2:Password2`
 - `sda_gpio`: Pin number used for SDA GPIO (8 for the ESP32-S3-DevKitC-1U-N8)
 - `scl_gpio`: Pin number used for SCL GPIO (9 for the ESP32-S3-DevKitC-1U-N8) 
-- `keepalive_led_gpio`: Optional value for some ESP development boards with an onboard LED. (48 for the ESP32-S3-DevKitC-1U-N8.)  If the pin of the LED is provided,  the LED will flash about every 5 seconds.  This is another experiment to try if you are trying to keep your battery pack alive, if you use an off-the-shelf USB battery pack with automatic shutoff. 
 
 ## Acknowledgments
 

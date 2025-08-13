@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
- * Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
+ * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
@@ -30,7 +30,7 @@
 #include "sensor_data.h"
 #include "app_context.h"
 #include "crash_handler.h"
-#include "task_keepalive_blink.h"
+#include "persistent_storage.h"
 
 #define TAG "MAIN"
 
@@ -65,13 +65,24 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    // Initialize persistent storage for sensor readings
+    err = persistent_storage_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Continuing without persistent storage (readings will be lost on Wi-Fi failure)");
+    } else {
+        ESP_LOGI(TAG, "Persistent storage initialized successfully");
+
+        // Log how many readings are already stored
+        int stored_count = 0;
+        err = persistent_storage_get_count(&stored_count);
+        if (err == ESP_OK && stored_count > 0) {
+            ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
+        }
+    }
+
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
-
-    // Initialize the keep-alive blink task only if a valid GPIO is configured.
-    if (CONFIG_KEEPALIVE_LED_GPIO >= 0) {
-        init_keepalive_blink_task();
-    }
 
     // Create the application context to share resources with tasks
     app_context_t *app_context = malloc(sizeof(app_context_t));
@@ -86,6 +97,7 @@ void app_main(void)
     app_context->reading_idx = &g_reading_idx;
     app_context->buffer_size = READING_BUFFER_SIZE;
     app_context->buffer_mutex = xSemaphoreCreateMutex();
+    app_context->wifi_send_failed = false;  // Initialize failure flag
 
     if (app_context->buffer_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex!");
@@ -93,13 +105,12 @@ void app_main(void)
         return;
     }
 
-    // Create and launch the tasks
+    // Create and launch the tasks with increased stack sizes to prevent stack overflow
     // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 4096, app_context, 5, NULL);
+    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);  // Increased from 4096
     // Give the send_data_task time to connect and perform the initial NTP sync
     vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 4096, app_context, 5, NULL);
-
+    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
     // The main task has nothing else to do, so it can be deleted.
