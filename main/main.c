@@ -1,5 +1,5 @@
 /**
-* @file main.c
+ * @file main.c
  *
  * ESP-IDF application to read and send ambient light levels using the BH1750 sensor.
  *
@@ -18,6 +18,8 @@
 #include "freertos/semphr.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
+#include "esp_pm.h"     // NEW: For power management control
+#include "esp_timer.h"  // NEW: For esp_timer_get_time()
 #include "app_config.h"
 #include "sdkconfig.h"
 #include "bh1750.h"
@@ -25,6 +27,7 @@
 #include "http.h"
 #include "task_send_data.h"
 #include "task_get_sensor_data.h"
+#include "task_keepalive_transistor.h"  // NEW: Include the smart keep-alive
 
 #include "light_sensor.h"
 #include "sensor_data.h"
@@ -48,6 +51,21 @@ static int g_reading_idx = 0;
 
 void app_main(void)
 {
+    // NEW: Disable power management to prevent sleep
+    ESP_LOGI(TAG, "Disabling power management to prevent sleep modes");
+    esp_pm_config_t pm_config = {
+        .max_freq_mhz = 240,
+        .min_freq_mhz = 240,         // Keep at max frequency - no frequency scaling
+        .light_sleep_enable = false  // Explicitly disable light sleep
+    };
+    esp_err_t pm_err = esp_pm_configure(&pm_config);
+    if (pm_err == ESP_OK) {
+        ESP_LOGI(TAG, "Power management configured: max CPU, no sleep");
+    } else {
+        ESP_LOGE(TAG, "Failed to configure power management: %s", esp_err_to_name(pm_err));
+        ESP_LOGW(TAG, "Continuing anyway, but ESP32 may still enter sleep modes");
+    }
+
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     const i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
@@ -81,6 +99,35 @@ void app_main(void)
         }
     }
 
+    // NEW: Initialize smart keep-alive system if configured
+    #ifdef CONFIG_KEEPALIVE_GPIO
+    keepalive_config_t keepalive_cfg = {
+        #ifdef CONFIG_KEEPALIVE_DURATION_SECONDS
+        .on_duration_seconds = CONFIG_KEEPALIVE_DURATION_SECONDS,
+        #else
+        .on_duration_seconds = 10,    // Default: 10 seconds ON
+        #endif
+
+        #ifdef CONFIG_KEEPALIVE_INTERVAL_MINUTES
+        .interval_minutes = CONFIG_KEEPALIVE_INTERVAL_MINUTES,
+        #else
+        .interval_minutes = 4,        // Default: Every 4 minutes
+        #endif
+
+        .control_gpio = CONFIG_KEEPALIVE_GPIO
+    };
+
+    err = init_smart_keepalive_task(&keepalive_cfg);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize smart keep-alive: %s", esp_err_to_name(err));
+        ESP_LOGW(TAG, "Continuing without smart keep-alive (may have power issues)");
+    } else {
+        ESP_LOGI(TAG, "Smart keep-alive system initialized successfully");
+    }
+    #else
+    ESP_LOGI(TAG, "Keep-alive system disabled (no keepalive_gpio configured in credentials.ini)");
+    #endif
+
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
 
@@ -113,6 +160,25 @@ void app_main(void)
     xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
-    // The main task has nothing else to do, so it can be deleted.
-    // vTaskDelete(NULL); // Or just let it exit.
+
+    // NEW: Main task monitoring loop to detect if system goes to sleep
+    ESP_LOGI(TAG, "Starting main task monitoring loop to detect sleep issues");
+    int loop_counter = 0;
+    while(1) {
+        loop_counter++;
+        ESP_LOGI(TAG, "Main task alive - loop #%d, uptime: %d seconds",
+                 loop_counter, (int)(esp_timer_get_time() / 1000000));
+
+        // Log every 30 seconds to monitor for sleep
+        vTaskDelay(pdMS_TO_TICKS(30000));
+
+        // If we stop seeing these logs, the ESP32 went to sleep
+        if (loop_counter % 8 == 0) {  // Every 4 minutes (8 * 30 seconds)
+            ESP_LOGI(TAG, "=== 4-MINUTE MARK - Keep-alive should activate soon ===");
+        }
+    }
+
+    // The main task should never exit this loop
+    // If it does, something went wrong
+    ESP_LOGE(TAG, "Main task exited unexpectedly!");
 }
