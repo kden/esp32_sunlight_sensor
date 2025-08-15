@@ -1,11 +1,11 @@
 /**
  * @file http.c
  *
- * HTTP client for sending sensor data.
+ * HTTP client for sending sensor data with proper error handling and chunked sending.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
- * Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
+ * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
@@ -15,10 +15,12 @@
 #include "cJSON.h"
 #include "http.h"
 #include "sensor_data.h"
+#include "git_version.h" // Include the auto-generated header
 #include <time.h>
 #include <string.h>
 
 #define TAG "HTTP"
+#define MAX_READINGS_PER_CHUNK 50  // Send at most 50 readings per HTTP request
 
 extern const uint8_t _binary_server_cert_pem_start[];
 extern const uint8_t _binary_server_cert_pem_end[];
@@ -58,13 +60,17 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
 }
 
 /**
- * @brief Private helper to send a pre-formatted JSON payload.
- * This function handles the entire HTTP client lifecycle.
- * It is declared with __attribute__((weak)) so it can be easily mocked in tests.
+ * @brief Private helper to send a pre-formatted JSON payload with proper error handling.
+ * This function handles the entire HTTP client lifecycle and returns meaningful error codes.
  */
-void __attribute__((weak)) _send_json_payload(const char* json_payload, const char* bearer_token) {
+static esp_err_t _send_json_payload_with_status(const char* json_payload, const char* bearer_token) {
     esp_http_client_handle_t client = NULL;
     esp_err_t err = ESP_FAIL;
+
+    if (json_payload == NULL || bearer_token == NULL) {
+        ESP_LOGE(TAG, "Invalid parameters: json_payload or bearer_token is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
 
     const char *cert_pem = (const char *)_binary_server_cert_pem_start;
 
@@ -72,94 +78,257 @@ void __attribute__((weak)) _send_json_payload(const char* json_payload, const ch
         .url = CONFIG_API_URL,
         .event_handler = http_event_handler,
         .cert_pem = cert_pem,
+        .timeout_ms = 30000, // 30 second timeout
     };
+
     client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "Failed to initialize HTTP client");
-        return; // No cleanup needed here
+        return ESP_ERR_NO_MEM;
     }
 
-    esp_http_client_set_method(client, HTTP_METHOD_POST);
-    esp_http_client_set_header(client, "Content-Type", "application/json");
+    // Set HTTP method and headers
+    err = esp_http_client_set_method(client, HTTP_METHOD_POST);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set HTTP method: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
+    err = esp_http_client_set_header(client, "Content-Type", "application/json");
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Content-Type header: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
     char auth_header[128];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", bearer_token);
-    esp_http_client_set_header(client, "Authorization", auth_header);
-    esp_http_client_set_post_field(client, json_payload, strlen(json_payload));
+    err = esp_http_client_set_header(client, "Authorization", auth_header);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set Authorization header: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
 
+    err = esp_http_client_set_post_field(client, json_payload, strlen(json_payload));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set POST data: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return err;
+    }
+
+    // Perform the HTTP request
     err = esp_http_client_perform(client);
     if (err == ESP_OK) {
-        ESP_LOGI(TAG, "HTTPS POST request sent successfully, status = %d", esp_http_client_get_status_code(client));
+        int status_code = esp_http_client_get_status_code(client);
+        int content_length = esp_http_client_get_content_length(client);
+
+        ESP_LOGI(TAG, "HTTPS POST request completed, status = %d, content_length = %d",
+                 status_code, content_length);
+
+        // Check if HTTP status indicates success (2xx range)
+        if (status_code >= 200 && status_code < 300) {
+            ESP_LOGI(TAG, "HTTP request successful with status %d", status_code);
+            err = ESP_OK;
+        } else {
+            ESP_LOGE(TAG, "HTTP request failed with status %d", status_code);
+            // Map HTTP status codes to ESP error codes
+            switch (status_code) {
+                case 400:
+                    err = ESP_ERR_INVALID_ARG;
+                    break;
+                case 401:
+                case 403:
+                    err = ESP_ERR_NOT_ALLOWED;
+                    break;
+                case 404:
+                    err = ESP_ERR_NOT_FOUND;
+                    break;
+                case 500:
+                case 502:
+                case 503:
+                    err = ESP_ERR_INVALID_RESPONSE;
+                    break;
+                default:
+                    err = ESP_FAIL;
+                    break;
+            }
+        }
     } else {
         ESP_LOGE(TAG, "HTTPS POST request failed: %s", esp_err_to_name(err));
     }
 
     esp_http_client_cleanup(client);
+    return err;
 }
 
+/**
+ * @brief Legacy wrapper function for backward compatibility
+ */
+void __attribute__((weak)) _send_json_payload(const char* json_payload, const char* bearer_token) {
+    esp_err_t result = _send_json_payload_with_status(json_payload, bearer_token);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "JSON payload send failed: %s", esp_err_to_name(result));
+    }
+}
 
-// Function to send sensor data
-void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
+/**
+ * @brief Internal function to send a single chunk of sensor data
+ */
+static esp_err_t _send_sensor_data_chunk(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
+    if (readings == NULL || count <= 0 || sensor_id == NULL || bearer_token == NULL) {
+        ESP_LOGE(TAG, "Invalid parameters for sensor data chunk send");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     cJSON *root_array = NULL;
     char *json_payload = NULL;
+    esp_err_t result = ESP_FAIL;
+
+    // Log available heap before creating JSON
+    size_t free_heap_before = esp_get_free_heap_size();
+    ESP_LOGD(TAG, "Free heap before JSON creation: %zu bytes", free_heap_before);
 
     root_array = cJSON_CreateArray();
     if (root_array == NULL) {
         ESP_LOGE(TAG, "Failed to create JSON array");
-        goto cleanup;
+        return ESP_ERR_NO_MEM;
     }
 
+    int valid_readings = 0;
     for (int i = 0; i < count; i++) {
         cJSON *sensor_object = cJSON_CreateObject();
         if (sensor_object == NULL) {
-            ESP_LOGE(TAG, "Failed to create sensor object for reading #%d", i);
-            continue;
+            ESP_LOGE(TAG, "Failed to create sensor object for reading #%d (may be out of memory)", i);
+            // Don't continue adding more objects if we're out of memory
+            break;
         }
 
         char timestamp_str[32];
         strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", gmtime(&readings[i].timestamp));
 
-        cJSON_AddNumberToObject(sensor_object, "light_intensity", readings[i].lux);
-        cJSON_AddStringToObject(sensor_object, "sensor_id", sensor_id);
-        cJSON_AddStringToObject(sensor_object, "timestamp", timestamp_str);
-        cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET);
+        if (cJSON_AddNumberToObject(sensor_object, "light_intensity", readings[i].lux) == NULL ||
+            cJSON_AddStringToObject(sensor_object, "sensor_id", sensor_id) == NULL ||
+            cJSON_AddStringToObject(sensor_object, "timestamp", timestamp_str) == NULL ||
+            cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET) == NULL) {
+            ESP_LOGE(TAG, "Failed to add fields to sensor object for reading #%d", i);
+            cJSON_Delete(sensor_object);
+            break;
+        }
 
-        cJSON_AddItemToArray(root_array, sensor_object);
+        if (cJSON_AddItemToArray(root_array, sensor_object) == 0) {
+            ESP_LOGE(TAG, "Failed to add sensor object to array for reading #%d", i);
+            cJSON_Delete(sensor_object);
+            break;
+        }
+
+        valid_readings++;
     }
 
-    if (cJSON_GetArraySize(root_array) == 0) {
-        ESP_LOGW(TAG, "No valid readings to send. Aborting HTTP POST.");
+    if (valid_readings == 0) {
+        ESP_LOGW(TAG, "No valid readings to send in this chunk. Aborting HTTP POST.");
+        result = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
+
+    // Log heap usage after building JSON
+    size_t free_heap_after_json = esp_get_free_heap_size();
+    ESP_LOGD(TAG, "Free heap after JSON creation: %zu bytes (used: %zu)",
+             free_heap_after_json, free_heap_before - free_heap_after_json);
 
     json_payload = cJSON_Print(root_array);
     if (json_payload == NULL) {
-        ESP_LOGE(TAG, "Failed to print JSON payload");
+        ESP_LOGE(TAG, "Failed to print JSON payload (likely out of memory)");
+        size_t free_heap_now = esp_get_free_heap_size();
+        ESP_LOGE(TAG, "Current free heap: %zu bytes", free_heap_now);
+        result = ESP_ERR_NO_MEM;
         goto cleanup;
     }
 
-    ESP_LOGD(TAG, "JSON Payload: %s", json_payload);
-    ESP_LOGI(TAG, "Sending JSON with %d records.", cJSON_GetArraySize(root_array));
+    ESP_LOGD(TAG, "JSON Payload for chunk: %s", json_payload);
+    ESP_LOGI(TAG, "Sending JSON chunk with %d records.", valid_readings);
 
-    _send_json_payload(json_payload, bearer_token);
+    result = _send_json_payload_with_status(json_payload, bearer_token);
 
 cleanup:
     if (root_array) cJSON_Delete(root_array);
     if (json_payload) free(json_payload);
+
+    // Log final heap status
+    size_t free_heap_final = esp_get_free_heap_size();
+    ESP_LOGD(TAG, "Free heap after cleanup: %zu bytes", free_heap_final);
+
+    return result;
 }
 
-void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
+// New functions with proper error handling and chunked sending
+esp_err_t send_sensor_data_with_status(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
+    if (readings == NULL || count <= 0 || sensor_id == NULL || bearer_token == NULL) {
+        ESP_LOGE(TAG, "Invalid parameters for sensor data send");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Sending %d readings in chunks of %d", count, MAX_READINGS_PER_CHUNK);
+
+    // Send data in chunks to avoid memory issues
+    int sent_count = 0;
+    esp_err_t final_result = ESP_OK;
+
+    while (sent_count < count) {
+        int chunk_size = (count - sent_count > MAX_READINGS_PER_CHUNK) ? MAX_READINGS_PER_CHUNK : (count - sent_count);
+
+        ESP_LOGI(TAG, "Sending chunk %d-%d of %d total readings",
+                 sent_count + 1, sent_count + chunk_size, count);
+
+        esp_err_t result = _send_sensor_data_chunk(&readings[sent_count], chunk_size, sensor_id, bearer_token);
+
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to send chunk %d-%d: %s",
+                     sent_count + 1, sent_count + chunk_size, esp_err_to_name(result));
+            final_result = result;
+            break; // Stop sending if a chunk fails
+        }
+
+        sent_count += chunk_size;
+        ESP_LOGI(TAG, "Successfully sent chunk. Progress: %d/%d readings", sent_count, count);
+
+        // Small delay between chunks to let the system recover
+        if (sent_count < count) {
+            vTaskDelay(pdMS_TO_TICKS(1000)); // 1 second delay between chunks
+        }
+    }
+
+    if (final_result == ESP_OK) {
+        ESP_LOGI(TAG, "Successfully sent all %d readings in %d chunks",
+                 count, (count + MAX_READINGS_PER_CHUNK - 1) / MAX_READINGS_PER_CHUNK);
+    } else {
+        ESP_LOGE(TAG, "Failed to send all readings. Sent %d/%d successfully", sent_count, count);
+    }
+
+    return final_result;
+}
+
+esp_err_t send_status_update_with_status(const char* status_message, const char* sensor_id, const char* bearer_token) {
+    if (status_message == NULL || sensor_id == NULL || bearer_token == NULL) {
+        ESP_LOGE(TAG, "Invalid parameters for status update");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     cJSON *root_array = NULL;
     char *json_payload = NULL;
+    esp_err_t result = ESP_FAIL;
 
     root_array = cJSON_CreateArray();
     if (root_array == NULL) {
         ESP_LOGE(TAG, "Failed to create JSON array for status update");
-        goto cleanup;
+        return ESP_ERR_NO_MEM;
     }
 
     cJSON *status_object = cJSON_CreateObject();
     if (status_object == NULL) {
         ESP_LOGE(TAG, "Failed to create status object");
+        result = ESP_ERR_NO_MEM;
         goto cleanup;
     }
 
@@ -173,20 +342,41 @@ void send_status_update(const char* status_message, const char* sensor_id, const
     cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET);
     cJSON_AddStringToObject(status_object, "status", status_message);
 
+    // Add the Git commit info to the status payload
+    cJSON_AddStringToObject(status_object, "commit_sha", GIT_COMMIT_SHA);
+    cJSON_AddStringToObject(status_object, "commit_timestamp", GIT_COMMIT_TIMESTAMP);
+
     cJSON_AddItemToArray(root_array, status_object);
 
     json_payload = cJSON_Print(root_array);
     if (json_payload == NULL) {
         ESP_LOGE(TAG, "Failed to print JSON payload for status update");
+        result = ESP_ERR_NO_MEM;
         goto cleanup;
     }
 
     ESP_LOGI(TAG, "Sending status update: '%s'", status_message);
     ESP_LOGD(TAG, "Status JSON Payload: %s", json_payload);
 
-    _send_json_payload(json_payload, bearer_token);
+    result = _send_json_payload_with_status(json_payload, bearer_token);
 
 cleanup:
     if (root_array) cJSON_Delete(root_array);
     if (json_payload) free(json_payload);
+    return result;
+}
+
+// Legacy functions for backward compatibility
+void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
+    esp_err_t result = send_sensor_data_with_status(readings, count, sensor_id, bearer_token);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Sensor data send failed: %s", esp_err_to_name(result));
+    }
+}
+
+void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
+    esp_err_t result = send_status_update_with_status(status_message, sensor_id, bearer_token);
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Status update send failed: %s", esp_err_to_name(result));
+    }
 }

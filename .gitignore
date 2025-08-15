@@ -11,3 +11,4 @@ sdkconfig.dynamic_sensor
 sdkconfig
 out
 **/*.pem
+/main/git_version.h
