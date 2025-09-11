@@ -30,7 +30,7 @@ void task_get_sensor_data(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(READING_INTERVAL_S * 1000));
 
         float lux = 0;
-        esp_err_t err = get_ambient_light(context->light_sensor_hdl, &lux);
+        esp_err_t err = get_ambient_light(context->light_sensor_dev, &lux);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "Failed to get light reading: %s", esp_err_to_name(err));
             continue;

@@ -20,11 +20,11 @@
 #include "esp_wifi.h"
 #include "app_config.h"
 #include "sdkconfig.h"
-#include "bh1750.h"
 #include "nvs_flash.h"
 #include "http.h"
 #include "task_send_data.h"
 #include "task_get_sensor_data.h"
+#include "git_version.h" // For build version info
 
 #include "light_sensor.h"
 #include "sensor_data.h"
@@ -48,14 +48,24 @@ static int g_reading_idx = 0;
 
 void app_main(void)
 {
-    // Initialize I2C
-    i2c_master_bus_handle_t i2c0_bus_hdl;
-    const i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
-    ESP_ERROR_CHECK(i2c_new_master_bus(&i2c0_bus_cfg, &i2c0_bus_hdl));
+    // Print the firmware version and build date
+    ESP_LOGI(TAG, "Firmware Version: %s", GIT_COMMIT_SHA);
+    ESP_LOGI(TAG, "Build Timestamp:  %s", GIT_COMMIT_TIMESTAMP);
 
-    // Initialize the light sensor
-    bh1750_handle_t light_sensor_hdl = NULL;
-    ESP_ERROR_CHECK(init_light_sensor(i2c0_bus_hdl, &light_sensor_hdl));
+    // Note: The i2cdev library handles I2C bus initialization implicitly
+    // when we initialize the sensor, so we no longer need to do it here.
+
+    // Create the application context to share resources with tasks
+    app_context_t *app_context = malloc(sizeof(app_context_t));
+    if (app_context == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for app context!");
+        return;
+    }
+    // Zero out the context
+    memset(app_context, 0, sizeof(app_context_t));
+
+    // Initialize the light sensor using the updated API
+    ESP_ERROR_CHECK(init_light_sensor(&app_context->light_sensor_dev));
 
     // Initialize non-volatile storage.
     esp_err_t err = nvs_flash_init();
@@ -84,15 +94,7 @@ void app_main(void)
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
 
-    // Create the application context to share resources with tasks
-    app_context_t *app_context = malloc(sizeof(app_context_t));
-    if (app_context == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for app context!");
-        // In a real scenario, you might want to restart here.
-        return;
-    }
-
-    app_context->light_sensor_hdl = light_sensor_hdl;
+    // Populate the rest of the application context
     app_context->reading_buffer = g_reading_buffer;
     app_context->reading_idx = &g_reading_idx;
     app_context->buffer_size = READING_BUFFER_SIZE;
@@ -113,6 +115,5 @@ void app_main(void)
     xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
-    // The main task has nothing else to do, so it can be deleted.
-    // vTaskDelete(NULL); // Or just let it exit.
 }
+

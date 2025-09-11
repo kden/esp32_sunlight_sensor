@@ -1,5 +1,5 @@
 /**
- * @file light_sensor.h
+* @file light_sensor.h
  *
  * Functions for reading the BH1750 sensor.
  *
@@ -12,7 +12,23 @@
 
 #pragma once
 
-esp_err_t init_light_sensor(i2c_master_bus_handle_t master_handle, bh1750_handle_t *handle);
-esp_err_t get_ambient_light(bh1750_handle_t handle, float *lux);
+#include "i2cdev.h"
+#include "esp_err.h"
 
+/**
+ * @brief Initializes the BH1750 light sensor.
+ *
+ * @param[out] dev Pointer to a pointer that will receive the address of the sensor's device descriptor.
+ * @return esp_err_t ESP_OK on success, error code on failure.
+ */
+esp_err_t init_light_sensor(i2c_dev_t **dev);
+
+/**
+ * @brief Reads the ambient light from the BH1750 sensor.
+ *
+ * @param dev Pointer to the initialized sensor's device descriptor.
+ * @param[out] lux Pointer to a float where the light level in Lux will be stored.
+ * @return esp_err_t ESP_OK on success, error code on failure.
+ */
+esp_err_t get_ambient_light(i2c_dev_t *dev, float *lux);
 

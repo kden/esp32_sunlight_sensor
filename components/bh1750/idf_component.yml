@@ -1,0 +1,13 @@
+## ESP-IDF component file for the local bh1750 driver
+version: "1.0.0"
+dependencies:
+  idf: ">=5.0"
+  # Use `override_path` to explicitly point to the local components.
+  # This tells the build system to use the local versions and not
+  # search the online registry.
+  i2cdev:
+    version: "*"
+    override_path: "../i2cdev"
+  esp_idf_lib_helpers:
+    version: "*"
+    override_path: "../esp_idf_lib_helpers"

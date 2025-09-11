@@ -14,17 +14,18 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "bh1750.h"
+#include "i2cdev.h" // Use the i2cdev descriptor type
 #include "sensor_data.h"
 
 /**
  * @brief A structure to hold shared resources for the application tasks.
  */
 typedef struct {
-    bh1750_handle_t light_sensor_hdl;
+    i2c_dev_t *light_sensor_dev; // Pointer to the i2c device descriptor
     sensor_reading_t *reading_buffer;
     int *reading_idx;
     int buffer_size;
     SemaphoreHandle_t buffer_mutex;
     bool wifi_send_failed;  // Flag to indicate if the last Wi-Fi send failed
 } app_context_t;
+

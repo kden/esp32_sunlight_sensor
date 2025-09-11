@@ -1,17 +1,24 @@
 dependencies:
+  esp_idf_lib_helpers:
+    dependencies: []
+    source:
+      path: /home/caden/code/esp32_sunlight_sensor/components/esp_idf_lib_helpers
+      type: local
+    version: '*'
+  i2cdev:
+    dependencies: []
+    source:
+      path: /home/caden/code/esp32_sunlight_sensor/components/i2cdev
+      type: local
+    version: '*'
   idf:
     source:
       type: idf
     version: 5.5.0
-  k0i05/esp_type_utils:
-    dependencies: []
-    source:
-      path: /home/caden/code/esp32_sunlight_sensor
-      type: local
-    version: '*'
 direct_dependencies:
+- esp_idf_lib_helpers
+- i2cdev
 - idf
-- k0i05/esp_type_utils
-manifest_hash: dfe62faf89393fd613bacb2cc9160fa55412f790262907d38d5d25f475b8f7c6
+manifest_hash: c3f2eafcf379847e3547bef29bf9584ec9ce96928f9ddbba0d3dd55a577655ff
 target: esp32c3
 version: 2.0.0

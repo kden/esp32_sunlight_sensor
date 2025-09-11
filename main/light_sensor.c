@@ -1,15 +1,11 @@
 /**
- * @file light_sensor.h
+ * @file light_sensor.c
  *
- * Functions for reading the BH1750 sensor.
+ * Functions for reading the BH1750 sensor, adapted for the i2cdev driver.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
  * Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
- *
- * For drivers and example code
- * Credit to Eric Gionet<gionet.c.eric@gmail.com>
- * https://github.com/K0I05/ESP32-S3_ESP-IDF_COMPONENTS/tree/main/components/peripherals/i2c/esp_bh1750
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
@@ -18,30 +14,62 @@
 #include "app_config.h"
 #include "bh1750.h"
 #include "light_sensor.h"
+#include "i2cdev.h"
+#include <esp_check.h> // Include for ESP_RETURN_ON_ERROR and other check macros
 
 #define TAG "LIGHT_SENSOR"
-esp_err_t init_light_sensor(i2c_master_bus_handle_t master_handle, bh1750_handle_t *handle)
+
+// Define the sensor descriptor as a static variable in this file
+static i2c_dev_t light_sensor_dev;
+
+esp_err_t init_light_sensor(i2c_dev_t **dev)
 {
-    bh1750_config_t dev_cfg = I2C_BH1750_CONFIG_DEFAULT;
-    esp_err_t err = bh1750_init(master_handle, &dev_cfg, handle);
-    if (err != ESP_OK || *handle == NULL)
-    {
-        ESP_LOGE(TAG, "bh1750 handle init failed");
-        return err;
-    }
+    // Initialize the I2Cdev library. This should be called once per application.
+    // It's safe to call multiple times.
+    ESP_RETURN_ON_ERROR(i2cdev_init(), TAG, "i2cdev_init failed");
+
+    // Initialize the sensor descriptor
+    ESP_RETURN_ON_ERROR(
+        bh1750_init_desc(&light_sensor_dev, BH1750_ADDR_LO, I2C0_MASTER_PORT, CONFIG_SENSOR_SDA_GPIO, CONFIG_SENSOR_SCL_GPIO),
+        TAG,
+        "bh1750_init_desc failed"
+    );
+
+    // Setup the sensor with continuous high-resolution mode
+    ESP_RETURN_ON_ERROR(
+        bh1750_setup(&light_sensor_dev, BH1750_MODE_CONTINUOUS, BH1750_RES_HIGH),
+        TAG,
+        "bh1750_setup failed"
+    );
+
+    // Pass the address of the static device descriptor back to the caller
+    *dev = &light_sensor_dev;
+
+    ESP_LOGI(TAG, "BH1750 light sensor initialized successfully");
+
     return ESP_OK;
 }
 
-esp_err_t get_ambient_light(bh1750_handle_t handle, float *lux)
+esp_err_t get_ambient_light(i2c_dev_t *dev, float *lux)
 {
-    esp_err_t result = bh1750_get_ambient_light(handle, lux);
+    if (dev == NULL || lux == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint16_t raw_lux = 0;
+    // The new driver reads an unsigned 16-bit integer
+    esp_err_t result = bh1750_read(dev, &raw_lux);
+
     if (result != ESP_OK)
     {
         ESP_LOGE(TAG, "bh1750 device read failed (%s)", esp_err_to_name(result));
     }
     else
     {
-        ESP_LOGI(TAG, "ambient light:     %.2f lux", *lux);
+        // The driver now returns the value in Lux directly
+        *lux = (float)raw_lux;
+        ESP_LOGI(TAG, "Ambient light: %.2f lux", *lux);
     }
     return result;
 }
+
