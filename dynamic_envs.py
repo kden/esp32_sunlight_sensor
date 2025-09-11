@@ -5,7 +5,7 @@ Creates dynamic PlatformIO environments based on the SENSOR_ENV variable.
 Enables credentials to be loaded to firmware on a per-sensor basis.
 
 Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
-Developed with assistance from ChatGPT 4o (2025) and Google Gemini 2.5 Pro (2025).
+Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
 Apache 2.0 Licensed as described in the file LICENSE
 """
 import os
@@ -44,7 +44,7 @@ if not config.has_section(sensor_env):
 
 try:
     url = config.get("all_sensors", "url")
-    sensor_set_id = config.get("all_sensors", "sensor_set_id")
+    sensor_set_id = config.get(sensor_env, "sensor_set_id")
     sensor_id = config.get(sensor_env, "sensor_id")
     bearer_token = config.get(sensor_env, "bearer_token")
     wifi_cred = config.get(sensor_env, "wifi_credentials")
@@ -72,7 +72,6 @@ env.Append(
     ]
 )
 
-# If this is run in CICD and credentials are logged, they'll be leaked.
 print("Successfully applied build flags:")
 print(f"  - SENSOR_ID: {sensor_id}")
 print(f"  - BEARER_TOKEN: redacted")

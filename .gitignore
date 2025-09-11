@@ -1,6 +1,7 @@
 .pio
 build
 .idea
+.idea/**
 credentials.ini
 esp32-sunlight-sensor.zip
 min_zipper.sh
