@@ -57,19 +57,19 @@ esp_err_t get_ambient_light(i2c_dev_t *dev, float *lux)
     }
 
     uint16_t raw_lux = 0;
-    // The new driver reads an unsigned 16-bit integer
+    // The driver reads an unsigned 16-bit integer representing lux
     esp_err_t result = bh1750_read(dev, &raw_lux);
 
     if (result != ESP_OK)
     {
-        ESP_LOGE(TAG, "bh1750 device read failed (%s)", esp_err_to_name(result));
+        // The calling task will log the error, so we just return it
+        return result;
     }
-    else
-    {
-        // The driver now returns the value in Lux directly
-        *lux = (float)raw_lux;
-        ESP_LOGI(TAG, "Ambient light: %.2f lux", *lux);
-    }
-    return result;
+
+    // The driver returns the value in Lux directly
+    *lux = (float)raw_lux;
+
+    // Logging of the value is handled by the calling task for better separation of concerns
+    return ESP_OK;
 }
 

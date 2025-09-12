@@ -45,13 +45,32 @@
 #define I2C0_MASTER_PORT               I2C_NUM_0
 
 // Provide default pin definitions if they are not set by the build environment
+
+#ifndef CONFIG_BATTERY_ADC_GPIO
+#define CONFIG_BATTERY_ADC_GPIO 2
+#endif
+
 #ifndef CONFIG_SENSOR_SDA_GPIO
 #define CONFIG_SENSOR_SDA_GPIO 21
 #endif
+
 #ifndef CONFIG_SENSOR_SCL_GPIO
 #define CONFIG_SENSOR_SCL_GPIO 22
 #endif
-//
+
+// Nighttime power saving configuration
+#ifndef CONFIG_NIGHT_START_HOUR
+#define CONFIG_NIGHT_START_HOUR 22  // Default: 10 PM
+#endif
+
+#ifndef CONFIG_NIGHT_END_HOUR
+#define CONFIG_NIGHT_END_HOUR 4     // Default: 4 AM
+#endif
+
+#ifndef CONFIG_LOCAL_TIMEZONE
+#define CONFIG_LOCAL_TIMEZONE "CST6CDT,M3.2.0,M11.1.0"  // Default: Chicago timezone
+#endif
+
 #define I2C0_TASK_SAMPLING_RATE        (10) // seconds
 #define I2C0_TASK_STACK_SIZE           (TSK_MINIMAL_STACK_SIZE * 8)
 #define I2C0_TASK_PRIORITY             (tskIDLE_PRIORITY + 2)
@@ -65,6 +84,12 @@
 #define SCH_TASK_PRIORITY              (tskIDLE_PRIORITY + 2)
 
 #define APP_TAG                         "SUNLIGHT SENSOR [APP]"
+
+// Battery monitoring settings
+#define BATTERY_VOLTAGE_DIVIDER_RATIO 2.0     // Two equal 10kΩ resistors
+#define BATTERY_PRESENT_THRESHOLD_V 2.5       // Minimum voltage to consider battery present
+#define BATTERY_LOW_THRESHOLD_V     3.2       // Low battery warning threshold
+#define BATTERY_CRITICAL_THRESHOLD_V 3.0      // Critical battery threshold
 
 // macros
 

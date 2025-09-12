@@ -13,6 +13,7 @@
 #pragma once
 
 #include <time.h>
+#include <stdbool.h>
 
 /**
  * @brief Structure to hold a single sensor reading for batching.
@@ -21,3 +22,10 @@ typedef struct {
     time_t timestamp;
     float lux;
 } sensor_reading_t;
+
+typedef struct {
+    time_t timestamp;
+    float voltage;
+    bool is_present;
+    float percentage;  // Estimated percentage
+} battery_reading_t;

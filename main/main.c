@@ -31,6 +31,8 @@
 #include "app_context.h"
 #include "crash_handler.h"
 #include "persistent_storage.h"
+#include "battery_monitor.h"
+#include "time_utils.h"
 
 #define TAG "MAIN"
 
@@ -67,6 +69,23 @@ void app_main(void)
     // Initialize the light sensor using the updated API
     ESP_ERROR_CHECK(init_light_sensor(&app_context->light_sensor_dev));
 
+    // Initialize battery monitoring (safe to call on both ESP32-C3 and ESP32-S3)
+    esp_err_t battery_err = battery_monitor_init();
+    if (battery_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to initialize battery monitor: %s", esp_err_to_name(battery_err));
+        ESP_LOGW(TAG, "Continuing without battery monitoring (this is normal for USB-powered devices)");
+    } else {
+        ESP_LOGI(TAG, "Battery monitoring initialized successfully");
+
+        battery_debug_info();
+
+        // Log initial battery status
+        char battery_status[128];
+        if (battery_get_status_string(battery_status, sizeof(battery_status)) == ESP_OK) {
+            ESP_LOGI(TAG, "Initial %s", battery_status);
+        }
+    }
+
     // Initialize non-volatile storage.
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -93,6 +112,8 @@ void app_main(void)
 
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
+
+    log_local_time_status();
 
     // Populate the rest of the application context
     app_context->reading_buffer = g_reading_buffer;

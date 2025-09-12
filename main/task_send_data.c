@@ -23,6 +23,10 @@
 #include <time.h>
 #include <string.h> // Required for strcmp
 
+#include "app_config.h"
+#include "battery_monitor.h"
+#include "time_utils.h"
+
 #define TAG "SEND_DATA_TASK"
 
 #define DATA_SEND_INTERVAL_MINUTES 5
@@ -160,7 +164,7 @@ static sensor_reading_t* create_corrected_readings(const sensor_reading_t* origi
 }
 
 /**
- * @brief Logs the current system time in both UTC and America/Chicago formats.
+ * @brief Logs the current system time in both UTC and local timezone formats.
  */
 static void log_system_time(void)
 {
@@ -175,21 +179,22 @@ static void log_system_time(void)
     localtime_r(&now, &timeinfo);
     strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
 
-    // Temporarily set timezone to CST/CDT to format the same time value
-    setenv("TZ", "CST6CDT,M3.2.0,M11.1.0", 1);
+    // Set timezone to configured local timezone to format the same time value
+    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
     tzset();
     localtime_r(&now, &timeinfo);
 
-    ESP_LOGI(TAG, "System time: %s (UTC) / %d:%02d:%02d (America/Chicago) [valid: %s]",
+    ESP_LOGI(TAG, "System time: %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
              time_str_buf, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
              is_system_time_valid() ? "yes" : "no");
 
     // Set back to UTC, this is our default.
     setenv("TZ", "UTC", 1);
+    tzset();
 }
 
 /**
- * @brief Create a formatted time string with both UTC and America/Chicago timestamps
+ * @brief Create a formatted time string with both UTC and local timestamps
  */
 static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix)
 {
@@ -204,12 +209,12 @@ static void format_time_status_message(char* buffer, size_t buffer_size, const c
     localtime_r(&now, &timeinfo);
     strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
 
-    // Temporarily set timezone to CST/CDT to format the same time value
-    setenv("TZ", "CST6CDT,M3.2.0,M11.1.0", 1);
+    // Set timezone to configured local timezone to format the same time value
+    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
     tzset();
     localtime_r(&now, &timeinfo);
 
-    snprintf(buffer, buffer_size, "%s %s (UTC) / %d:%02d:%02d (America/Chicago) [valid: %s]",
+    snprintf(buffer, buffer_size, "%s %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
              prefix, time_str_buf, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
              is_system_time_valid() ? "yes" : "no");
 
@@ -413,6 +418,16 @@ void task_send_data(void *arg) {
             send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
         }
 
+        // Send battery status if available
+        char battery_status[128];
+        esp_err_t battery_err = battery_get_status_string(battery_status, sizeof(battery_status));
+        if (battery_err == ESP_OK) {
+            ESP_LOGI(TAG, "Battery status: %s", battery_status);
+            send_status_update_with_retry(battery_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        } else {
+            ESP_LOGW(TAG, "Failed to get battery status: %s", esp_err_to_name(battery_err));
+        }
+
         // Always attempt NTP sync on successful connection if time is invalid
         // This is the initial boot sync, so send status update
         sync_time_if_needed(true);
@@ -444,6 +459,16 @@ void task_send_data(void *arg) {
 
         // Check if it's time to send data
         if ((now - last_send_time) >= DATA_SEND_INTERVAL_S) {
+            // Log current time status
+            log_local_time_status();
+
+            // Check if it's nighttime - skip sending to save power
+            if (is_nighttime_local()) {
+                ESP_LOGI(TAG, "Nighttime detected - skipping data transmission for power savings");
+                last_send_time = time(NULL); // Update time to prevent immediate retry
+                continue;
+            }
+
             ESP_LOGI(TAG, "Data send interval reached. Connecting to Wi-Fi...");
             wifi_manager_init();
 
@@ -481,6 +506,16 @@ void task_send_data(void *arg) {
                         ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
                     } else {
                         ESP_LOGE(TAG, "Regular NTP sync failed");
+                    }
+                }
+
+                char battery_status[128];
+                esp_err_t battery_err = battery_get_status_string(battery_status, sizeof(battery_status));
+                if (battery_err == ESP_OK) {
+                    ESP_LOGI(TAG, "Periodic battery status: %s", battery_status);
+                    // Only send status update if battery is actually present to avoid spam
+                    if (battery_is_present()) {
+                        send_status_update_with_retry(battery_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
                     }
                 }
 
@@ -573,3 +608,4 @@ void task_send_data(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(TASK_LOOP_CHECK_INTERVAL_S * 1000)); // Check periodically
     }
 }
+

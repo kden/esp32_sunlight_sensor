@@ -18,6 +18,8 @@
 #include <string.h>
 #include <time.h>
 
+#include "time_utils.h"
+
 #define TAG "SENSOR_TASK"
 #define READING_INTERVAL_S 15
 
@@ -28,6 +30,12 @@ void task_get_sensor_data(void *arg) {
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(READING_INTERVAL_S * 1000));
+
+        // Check if it's nighttime - skip sensor reading to save power
+        if (is_nighttime_local()) {
+            ESP_LOGD(TAG, "Nighttime detected - skipping sensor reading for power savings");
+            continue;
+        }
 
         float lux = 0;
         esp_err_t err = get_ambient_light(context->light_sensor_dev, &lux);
