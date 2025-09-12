@@ -208,26 +208,3 @@ esp_err_t battery_get_status_string(char *buffer, size_t buffer_size) {
     snprintf(buffer, buffer_size, "battery %.2fV %.0f%% %s", voltage, percentage, status);
     return ESP_OK;
 }
-
-void battery_debug_info(void) {
-    ESP_LOGI(TAG, "=== Battery Monitor Debug Info ===");
-    ESP_LOGI(TAG, "Configured GPIO: %d", CONFIG_BATTERY_ADC_GPIO);
-    ESP_LOGI(TAG, "ADC Channel: %d", battery_adc_channel);
-    ESP_LOGI(TAG, "ADC Handle: %p", adc1_handle);
-    ESP_LOGI(TAG, "ADC Calibrated: %s", adc_calibrated ? "Yes" : "No");
-    ESP_LOGI(TAG, "Voltage Divider Ratio: %.1f", BATTERY_VOLTAGE_DIVIDER_RATIO);
-    ESP_LOGI(TAG, "Present Threshold: %.1fV", BATTERY_PRESENT_THRESHOLD_V);
-
-    // Test raw ADC reading
-    if (adc1_handle != NULL) {
-        int raw_reading;
-        esp_err_t ret = adc_oneshot_read(adc1_handle, battery_adc_channel, &raw_reading);
-        if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "Raw ADC reading: %d (%.3fV at ADC input)",
-                     raw_reading, (raw_reading / 4095.0) * 3.3);
-        } else {
-            ESP_LOGE(TAG, "Failed to read raw ADC: %s", esp_err_to_name(ret));
-        }
-    }
-    ESP_LOGI(TAG, "===============================");
-}

@@ -45,8 +45,3 @@ esp_err_t battery_get_voltage(float *voltage);
  * @return esp_err_t ESP_OK on success, error code on failure
  */
 esp_err_t battery_get_status_string(char *buffer, size_t buffer_size);
-
-/**
- * @brief Print debug information about battery monitoring setup
- */
-void battery_debug_info(void);

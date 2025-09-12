@@ -26,6 +26,7 @@
 #include "app_config.h"
 #include "battery_monitor.h"
 #include "time_utils.h"
+#include "power_management.h"
 
 #define TAG "SEND_DATA_TASK"
 
@@ -462,11 +463,26 @@ void task_send_data(void *arg) {
             // Log current time status
             log_local_time_status();
 
-            // Check if it's nighttime - skip sending to save power
+            // Check if it's nighttime - handle accordingly based on device
             if (is_nighttime_local()) {
-                ESP_LOGI(TAG, "Nighttime detected - skipping data transmission for power savings");
-                last_send_time = time(NULL); // Update time to prevent immediate retry
-                continue;
+                ESP_LOGI(TAG, "Nighttime detected");
+
+                // Try deep sleep for ESP32-C3 with battery
+                if (should_enter_deep_sleep()) {
+                    ESP_LOGI(TAG, "Entering deep sleep mode");
+
+                    // Give other tasks a moment to finish
+                    vTaskDelay(pdMS_TO_TICKS(2000));
+
+                    // Enter deep sleep (this will restart the system when it wakes up)
+                    enter_night_sleep();
+                    // This function does not return if sleep conditions are met
+                } else {
+                    // Skip transmission but stay awake (USB-powered or ESP32-S3)
+                    ESP_LOGI(TAG, "Skipping data transmission for power savings (staying awake)");
+                    last_send_time = time(NULL); // Update time to prevent immediate retry
+                    continue;
+                }
             }
 
             ESP_LOGI(TAG, "Data send interval reached. Connecting to Wi-Fi...");

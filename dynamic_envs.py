@@ -50,6 +50,11 @@ try:
     wifi_cred = config.get(sensor_env, "wifi_credentials")
     sda_gpio = config.get(sensor_env, "sda_gpio")
     scl_gpio = config.get(sensor_env, "scl_gpio")
+    # Battery ADC GPIO is optional, default to 2 if not specified
+    battery_adc_gpio = config.get(sensor_env, "battery_adc_gpio", fallback="2")
+    night_start_hour = config.get(sensor_env, "night_start_hour", fallback="22")
+    night_end_hour = config.get(sensor_env, "night_end_hour", fallback="4")
+    local_timezone = config.get(sensor_env, "local_timezone", fallback="CST6CDT,M3.2.0,M11.1.0")
 
 except configparser.NoOptionError as e:
     print(f"Error: Missing configuration in section '[{sensor_env}]'. {e}")
@@ -68,7 +73,11 @@ env.Append(
         f'-D CONFIG_API_URL=\\"{url}\\"',
         f'-D CONFIG_SENSOR_SET=\\"{sensor_set_id}\\"',
         f'-D CONFIG_SENSOR_SDA_GPIO={sda_gpio}',
-        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}'
+        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}',
+        f'-D CONFIG_BATTERY_ADC_GPIO={battery_adc_gpio}',
+        f'-D CONFIG_NIGHT_START_HOUR={night_start_hour}',
+        f'-D CONFIG_NIGHT_END_HOUR={night_end_hour}',
+        f'-D CONFIG_LOCAL_TIMEZONE=\\"{local_timezone}\\"'
     ]
 )
 
@@ -80,3 +89,7 @@ print(f"  - API_URL: {url}")
 print(f"  - SENSOR_SET: {sensor_set_id}")
 print(f"  - SDA_GPIO: {sda_gpio}")
 print(f"  - SCL_GPIO: {scl_gpio}")
+print(f"  - BATTERY_ADC_GPIO: {battery_adc_gpio}")
+print(f"  - NIGHT_START_HOUR: {night_start_hour}")
+print(f"  - NIGHT_END_HOUR: {night_end_hour}")
+print(f"  - LOCAL_TIMEZONE: {local_timezone}")

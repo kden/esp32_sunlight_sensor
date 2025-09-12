@@ -33,6 +33,7 @@
 #include "persistent_storage.h"
 #include "battery_monitor.h"
 #include "time_utils.h"
+#include "power_management.h"
 
 #define TAG "MAIN"
 
@@ -50,6 +51,9 @@ static int g_reading_idx = 0;
 
 void app_main(void)
 {
+    // Check wakeup reason first
+    esp_sleep_wakeup_cause_t wakeup_reason = check_wakeup_reason();
+
     // Print the firmware version and build date
     ESP_LOGI(TAG, "Firmware Version: %s", GIT_COMMIT_SHA);
     ESP_LOGI(TAG, "Build Timestamp:  %s", GIT_COMMIT_TIMESTAMP);
@@ -76,8 +80,6 @@ void app_main(void)
         ESP_LOGW(TAG, "Continuing without battery monitoring (this is normal for USB-powered devices)");
     } else {
         ESP_LOGI(TAG, "Battery monitoring initialized successfully");
-
-        battery_debug_info();
 
         // Log initial battery status
         char battery_status[128];
@@ -113,7 +115,18 @@ void app_main(void)
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
 
+    // Log initial time status for debugging
     log_local_time_status();
+
+    // Check if we should immediately go back to sleep (timer wakeup during night)
+    if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER && is_nighttime_local()) {
+        ESP_LOGI(TAG, "Timer wakeup during nighttime - checking if it's time to resume normal operation");
+
+        // Try to enter sleep again - function will check conditions
+        enter_night_sleep();
+        // If we reach here, conditions weren't met for sleep (e.g., no battery, time changed)
+        ESP_LOGI(TAG, "Sleep conditions no longer met - continuing with normal operation");
+    }
 
     // Populate the rest of the application context
     app_context->reading_buffer = g_reading_buffer;
@@ -137,4 +150,3 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
 }
-
