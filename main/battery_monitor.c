@@ -17,6 +17,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include <math.h>
+#include "wifi_monitor.h"
 
 #define TAG "BATTERY_MONITOR"
 
@@ -206,5 +207,33 @@ esp_err_t battery_get_status_string(char *buffer, size_t buffer_size) {
     }
 
     snprintf(buffer, buffer_size, "battery %.2fV %.0f%% %s", voltage, percentage, status);
+    return ESP_OK;
+}
+
+esp_err_t get_device_status_string(char *buffer, size_t buffer_size) {
+    if (buffer == NULL || buffer_size == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char battery_status[64];
+    char wifi_status[64];
+
+    // Get battery status
+    esp_err_t battery_err = battery_get_status_string(battery_status, sizeof(battery_status));
+
+    // Get WiFi status
+    esp_err_t wifi_err = wifi_get_status_string(wifi_status, sizeof(wifi_status));
+
+    // Combine both statuses
+    if (battery_err == ESP_OK && wifi_err == ESP_OK) {
+        snprintf(buffer, buffer_size, "%s | %s", battery_status, wifi_status);
+    } else if (battery_err == ESP_OK) {
+        snprintf(buffer, buffer_size, "%s | wifi error", battery_status);
+    } else if (wifi_err == ESP_OK) {
+        snprintf(buffer, buffer_size, "battery error | %s", wifi_status);
+    } else {
+        snprintf(buffer, buffer_size, "battery error | wifi error");
+    }
+
     return ESP_OK;
 }

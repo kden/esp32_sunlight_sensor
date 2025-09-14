@@ -45,3 +45,12 @@ esp_err_t battery_get_voltage(float *voltage);
  * @return esp_err_t ESP_OK on success, error code on failure
  */
 esp_err_t battery_get_status_string(char *buffer, size_t buffer_size);
+
+/**
+ * @brief Get combined device status (battery + wifi) for reporting
+ *
+ * @param buffer Buffer to store the combined status string
+ * @param buffer_size Size of the buffer
+ * @return esp_err_t ESP_OK on success, error code on failure
+ */
+esp_err_t get_device_status_string(char *buffer, size_t buffer_size);

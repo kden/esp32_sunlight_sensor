@@ -19,14 +19,13 @@
 #include "esp_log.h"
 #include "sdkconfig.h"
 #include "persistent_storage.h"
-#include <stdlib.h>
-#include <time.h>
-#include <string.h> // Required for strcmp
-
-#include "app_config.h"
 #include "battery_monitor.h"
 #include "time_utils.h"
 #include "power_management.h"
+#include "wifi_monitor.h"
+#include <stdlib.h>
+#include <time.h>
+#include <string.h> // Required for strcmp
 
 #define TAG "SEND_DATA_TASK"
 
@@ -408,25 +407,40 @@ void task_send_data(void *arg) {
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
 
-        // Send WiFi connection status
+        // Send WiFi connection status with IP address
         wifi_config_t wifi_config;
+        char ip_address[16];
+        esp_err_t ip_err = wifi_get_ip_address(ip_address, sizeof(ip_address));
+
         if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
-            char status_msg[64];
-            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s", (char *)wifi_config.sta.ssid);
+            char status_msg[128];
+            if (ip_err == ESP_OK) {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s",
+                         (char *)wifi_config.sta.ssid, ip_address);
+            } else {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s",
+                         (char *)wifi_config.sta.ssid);
+            }
             send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
         } else {
             ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
-            send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            if (ip_err == ESP_OK) {
+                char status_msg[64];
+                snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s", ip_address);
+                send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            } else {
+                send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            }
         }
 
-        // Send battery status if available
-        char battery_status[128];
-        esp_err_t battery_err = battery_get_status_string(battery_status, sizeof(battery_status));
-        if (battery_err == ESP_OK) {
-            ESP_LOGI(TAG, "Battery status: %s", battery_status);
-            send_status_update_with_retry(battery_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        // Send combined device status (battery + wifi) if available
+        char device_status[256];
+        esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
+        if (device_err == ESP_OK) {
+            ESP_LOGI(TAG, "Device status: %s", device_status);
+            send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
         } else {
-            ESP_LOGW(TAG, "Failed to get battery status: %s", esp_err_to_name(battery_err));
+            ESP_LOGW(TAG, "Failed to get device status: %s", esp_err_to_name(device_err));
         }
 
         // Always attempt NTP sync on successful connection if time is invalid
@@ -525,13 +539,14 @@ void task_send_data(void *arg) {
                     }
                 }
 
-                char battery_status[128];
-                esp_err_t battery_err = battery_get_status_string(battery_status, sizeof(battery_status));
-                if (battery_err == ESP_OK) {
-                    ESP_LOGI(TAG, "Periodic battery status: %s", battery_status);
-                    // Only send status update if battery is actually present to avoid spam
-                    if (battery_is_present()) {
-                        send_status_update_with_retry(battery_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                // Send combined device status (battery + wifi) update every send cycle
+                char device_status[256];
+                esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
+                if (device_err == ESP_OK) {
+                    ESP_LOGI(TAG, "Periodic device status: %s", device_status);
+                    // Only send status update if battery is actually present or if we have WiFi info to avoid spam
+                    if (battery_is_present() || wifi_is_connected()) {
+                        send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
                     }
                 }
 
@@ -624,4 +639,3 @@ void task_send_data(void *arg) {
         vTaskDelay(pdMS_TO_TICKS(TASK_LOOP_CHECK_INTERVAL_S * 1000)); // Check periodically
     }
 }
-
