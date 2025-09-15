@@ -34,8 +34,13 @@ esp_err_t send_sensor_data_with_status(const sensor_reading_t* readings, int cou
  * @param bearer_token Authentication bearer token
  * @return esp_err_t ESP_OK on success, error code on failure
  */
-esp_err_t send_status_update_with_status(const char* status_message, const char* sensor_id, const char* bearer_token);
+esp_err_t send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token);
 
-// Keep the original functions for backward compatibility
-void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token);
-void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token);
+/**
+ * @brief Send battery status update with detailed metrics
+ *
+ * @param sensor_id Sensor identifier string
+ * @param bearer_token Authentication bearer token
+ * @return esp_err_t ESP_OK on success, ESP_ERR_NOT_FOUND if no battery
+ */
+esp_err_t send_battery_status_update(const char* sensor_id, const char* bearer_token);

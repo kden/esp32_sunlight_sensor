@@ -13,6 +13,7 @@
  */
 
 #include "crash_handler.h"
+#include "app_config.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "http.h"

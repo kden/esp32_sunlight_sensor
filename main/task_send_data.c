@@ -11,6 +11,7 @@
  */
 
 #include "task_send_data.h"
+#include "app_config.h"
 #include "http.h"
 #include "app_context.h"
 #include "ntp.h"
@@ -25,7 +26,7 @@
 #include "wifi_monitor.h"
 #include <stdlib.h>
 #include <time.h>
-#include <string.h> // Required for strcmp
+#include <string.h>
 
 #define TAG "SEND_DATA_TASK"
 
@@ -37,218 +38,346 @@
 #define MAX_HTTP_RETRY_ATTEMPTS 3
 #define HTTP_RETRY_DELAY_MS 5000
 
-// Forward declarations for functions used by sync_time_if_needed()
-static void log_system_time(void);
-static void calculate_time_correction(void);
+// Forward declarations
 static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix);
 static bool send_status_update_with_retry(const char* status_message, const char* sensor_id, const char* bearer_token);
 
-// Global time correction variables
-static time_t g_time_correction_offset = 0;
+// Global time tracking variables
 static bool g_time_is_valid = false;
 static bool g_initial_boot_complete = false; // Track if initial boot sync is complete
 
 /**
- * @brief Attempt NTP sync if needed when internet connection is available
- * Call this whenever you successfully connect to the internet
- * @param send_status_update If true, send status update to API; if false, only log
+ * @brief Helper structure for timezone callback functions
  */
-static bool sync_time_if_needed(bool send_status_update) {
-    if (!is_system_time_valid() || !g_time_is_valid) {
-        ESP_LOGI(TAG, "Time invalid, attempting NTP sync on connection");
-        bool ntp_success = initialize_sntp();
-        if (ntp_success) {
-            log_system_time();
-            calculate_time_correction();
+typedef struct {
+    char* buffer;
+    size_t buffer_size;
+    const char* prefix;
+} time_format_data_t;
 
-            if (send_status_update) {
-                char ntp_status_msg[128];
-                format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
-                send_status_update_with_retry(ntp_status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            } else {
-                ESP_LOGI(TAG, "NTP sync successful (status not sent - post-boot sync)");
-            }
-            return true;
+
+/**
+ * @brief Callback function to log system time in both UTC and local formats
+ *
+ * Used by log_system_time() to display comprehensive time information
+ * for debugging NTP synchronization and timezone handling.
+ *
+ * @param local_time Current time in local timezone
+ * @param now Current timestamp
+ * @param user_data Unused (pass NULL)
+ *
+ * Example output: "System time: 2025-01-16 04:45:30 (UTC) / 22:45:30 (local) [valid: yes]"
+ * Example output: "System time: 1970-01-01 00:00:15 (UTC) / 18:00:15 (local) [valid: no]"
+ */
+static void log_system_time_callback(const struct tm* local_time, time_t now, void* user_data) {
+    char time_str_buf[64];
+    struct tm utc_time;
+
+    // Format UTC time
+    gmtime_r(&now, &utc_time);
+    strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &utc_time);
+
+    ESP_LOGI(TAG, "System time: %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
+             time_str_buf, local_time->tm_hour, local_time->tm_min, local_time->tm_sec,
+             is_system_time_valid() ? "yes" : "no");
+}
+
+/**
+ * @brief Callback function to format time status message for API transmission
+ *
+ * Creates a formatted string containing both UTC and local time information
+ * suitable for sending as status updates to the remote API.
+ *
+ * @param local_time Current time in local timezone
+ * @param now Current timestamp
+ * @param user_data Pointer to time_format_data_t structure containing buffer and prefix
+ *
+ * Example output: "ntp set 2025-01-16 04:45:30 (UTC) / 22:45:30 (local) [valid: yes]"
+ * Example output: "boot time 2025-01-16 04:45:30 (UTC) / 22:45:30 (local) [valid: no]"
+ */
+static void format_time_status_callback(const struct tm* local_time, time_t now, void* user_data) {
+    time_format_data_t* data = (time_format_data_t*)user_data;
+    char time_str_buf[64];
+    struct tm utc_time;
+
+    // Format UTC time
+    gmtime_r(&now, &utc_time);
+    strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &utc_time);
+
+    snprintf(data->buffer, data->buffer_size, "%s %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
+             data->prefix, time_str_buf, local_time->tm_hour, local_time->tm_min, local_time->tm_sec,
+             is_system_time_valid() ? "yes" : "no");
+}
+
+/**
+ * @brief Send WiFi connection status message with IP address and SSID
+ *
+ * Creates and sends a standardized WiFi connection status message containing
+ * the connected SSID and IP address (if available).
+ */
+static void send_wifi_connection_status(void) {
+    wifi_config_t wifi_config;
+    char ip_address[16];
+    char status_msg[128];
+    int8_t rssi;
+
+    esp_err_t ip_err = wifi_get_ip_address(ip_address, sizeof(ip_address));
+    esp_err_t rssi_err = wifi_get_rssi(&rssi);
+
+    if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
+        if (ip_err == ESP_OK && rssi_err == ESP_OK) {
+            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s %ddBm",
+                     (char *)wifi_config.sta.ssid, ip_address, rssi);
+        } else if (ip_err == ESP_OK) {
+            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s",
+                     (char *)wifi_config.sta.ssid, ip_address);
         } else {
-            ESP_LOGE(TAG, "NTP sync failed despite internet connection");
-            if (send_status_update) {
-                send_status_update_with_retry("ntp sync failed despite connection", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            }
-            return false;
+            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s",
+                     (char *)wifi_config.sta.ssid);
+        }
+    } else {
+        ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
+        if (ip_err == ESP_OK && rssi_err == ESP_OK) {
+            snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s %ddBm", ip_address, rssi);
+        } else if (ip_err == ESP_OK) {
+            snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s", ip_address);
+        } else {
+            strcpy(status_msg, "wifi connected");
         }
     }
-    return true; // Time was already valid
+
+    send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
 }
 
 /**
- * @brief Apply time correction to a timestamp
+ * @brief Process buffered sensor readings with automatic buffer management
+ *
+ * Safely allocates a temporary buffer, copies readings from the shared buffer,
+ * clears the shared buffer, and calls the processor function.
+ *
+ * @param context Application context containing the shared buffer
+ * @param processor Function to process the readings (send or save)
+ * @return true if processing was successful, false on error
  */
-static time_t apply_time_correction(time_t original_timestamp) {
-    if (g_time_is_valid && g_time_correction_offset != 0) {
-        return original_timestamp + g_time_correction_offset;
+static bool process_buffered_readings(app_context_t *context,
+                                    bool (*processor)(sensor_reading_t*, int)) {
+    sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
+    if (temp_buffer == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate temporary buffer for readings");
+        return false;
     }
-    return original_timestamp;
+
+    int temp_count = 0;
+    bool success = true;
+
+    if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
+        if (*(context->reading_idx) > 0) {
+            memcpy(temp_buffer, context->reading_buffer,
+                   *(context->reading_idx) * sizeof(sensor_reading_t));
+            temp_count = *(context->reading_idx);
+            *(context->reading_idx) = 0;
+        }
+        xSemaphoreGive(context->buffer_mutex);
+    }
+
+    if (temp_count > 0) {
+        success = processor(temp_buffer, temp_count);
+    }
+
+    free(temp_buffer);
+    return success;
 }
 
 /**
- * @brief Calculate and store time correction offset when NTP sync succeeds
+ * @brief Send combined device status (battery + wifi) if appropriate
+ *
+ * Gets the current device status and sends it to the API if a battery is present
+ * or WiFi is connected to avoid spam.
  */
-static void calculate_time_correction(void) {
-    if (!g_time_is_valid) {
-        time_t now_corrected;
-        time(&now_corrected);
+static void send_device_status_if_appropriate(void) {
+    static bool initial_no_battery_sent = false;
 
-        // If we had an invalid time before and now have valid time,
-        // we can't really calculate a meaningful correction for past readings
-        // since the old timestamps were essentially random
-        ESP_LOGI(TAG, "Time correction established. Future readings will use correct time.");
-        g_time_is_valid = true;
-        g_time_correction_offset = 0; // No correction needed for future readings
+    // Try to send detailed battery status first
+    esp_err_t battery_result = send_battery_status_update(CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+
+    if (battery_result == ESP_OK) {
+        ESP_LOGI(TAG, "Battery status sent successfully");
+    } else if (battery_result == ESP_ERR_NOT_FOUND) {
+        // No battery detected - only send this once after boot
+        if (!initial_no_battery_sent) {
+            send_status_update_with_retry("no battery detected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            initial_no_battery_sent = true;
+            ESP_LOGI(TAG, "Initial 'no battery' status sent");
+        } else {
+            ESP_LOGD(TAG, "Skipping repeated 'no battery' status");
+        }
+    } else {
+        ESP_LOGW(TAG, "Failed to get battery status: %s", esp_err_to_name(battery_result));
     }
 }
 
 /**
- * @brief Create a corrected copy of sensor readings with fixed timestamps
+ * @brief Handle NTP synchronization based on current conditions
+ *
+ * Performs NTP sync if time is invalid or regular interval has passed.
+ * Manages sync timing and status reporting.
+ *
+ * @param last_ntp_sync_time Pointer to last sync timestamp (updated on successful sync)
+ * @param is_initial_boot Whether this is the initial boot sync
  */
-static sensor_reading_t* create_corrected_readings(const sensor_reading_t* original_readings, int count, int* corrected_count) {
+static void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
+    time_t now = time(NULL);
+    bool need_sync = false;
+    const char* sync_reason = "";
+
+    // Always sync if time is invalid
+    if (!is_system_time_valid() || !g_time_is_valid) {
+        need_sync = true;
+        sync_reason = "Time invalid, performing NTP sync";
+    }
+    // Regular interval sync for valid time
+    else if ((now - *last_ntp_sync_time) >= NTP_SYNC_INTERVAL_S) {
+        need_sync = true;
+        sync_reason = "Regular NTP sync interval reached";
+    }
+
+    if (need_sync) {
+        ESP_LOGI(TAG, "%s", sync_reason);
+
+        if (!is_system_time_valid() || !g_time_is_valid) {
+            // Critical sync needed
+            bool ntp_success = initialize_sntp();
+            if (ntp_success) {
+                with_local_timezone(log_system_time_callback, NULL);
+                g_time_is_valid = true;
+
+                if (is_initial_boot) {
+                    char ntp_status_msg[128];
+                    format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
+                    send_status_update_with_retry(ntp_status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                } else {
+                    ESP_LOGI(TAG, "NTP sync successful (status not sent - post-boot sync)");
+                }
+                *last_ntp_sync_time = time(NULL);
+            } else {
+                ESP_LOGE(TAG, "NTP sync failed despite internet connection");
+                if (is_initial_boot) {
+                    send_status_update_with_retry("ntp sync failed despite connection", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                }
+            }
+        } else {
+            // Regular interval sync
+            bool ntp_success = initialize_sntp();
+            if (ntp_success) {
+                with_local_timezone(log_system_time_callback, NULL);
+                *last_ntp_sync_time = time(NULL);
+
+                char ntp_status_msg[128];
+                format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
+                ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
+            } else {
+                ESP_LOGE(TAG, "Regular NTP sync failed");
+            }
+        }
+    }
+}
+
+/**
+ * @brief Create a filtered copy of sensor readings with valid timestamps only
+ */
+static sensor_reading_t* create_filtered_readings(const sensor_reading_t* original_readings, int count, int* filtered_count) {
     if (original_readings == NULL) {
-        *corrected_count = 0;
+        *filtered_count = 0;
         return NULL;
     }
 
     if (count <= 0) {
-        *corrected_count = 0;
+        *filtered_count = 0;
         return NULL;
     }
 
-    sensor_reading_t* corrected = malloc(count * sizeof(sensor_reading_t));
-    if (corrected == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for corrected readings");
-        *corrected_count = 0;
+    sensor_reading_t* filtered = malloc(count * sizeof(sensor_reading_t));
+    if (filtered == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for filtered readings");
+        *filtered_count = 0;
         return NULL;
     }
 
-    *corrected_count = 0;
+    *filtered_count = 0;
     time_t now;
     time(&now);
 
     for (int i = 0; i < count; i++) {
-        corrected[*corrected_count] = original_readings[i];
-
         // Only include readings with reasonable timestamps
-        time_t corrected_timestamp = apply_time_correction(original_readings[i].timestamp);
+        time_t timestamp = original_readings[i].timestamp;
 
-        // Skip readings that are still unreasonable even after correction
-        if (corrected_timestamp < 1704067200) { // Before 2024
-            ESP_LOGW(TAG, "Skipping reading with invalid timestamp: %lld", (long long)corrected_timestamp);
+        // Skip readings that are unreasonable
+        if (timestamp < 1704067200) { // Before 2024
+            ESP_LOGW(TAG, "Skipping reading with invalid timestamp: %lld", (long long)timestamp);
             continue;
         }
 
         // Don't send readings from the future (more than 1 hour ahead)
-        if (corrected_timestamp > now + 3600) {
-            ESP_LOGW(TAG, "Skipping reading with future timestamp: %lld", (long long)corrected_timestamp);
+        if (timestamp > now + 3600) {
+            ESP_LOGW(TAG, "Skipping reading with future timestamp: %lld", (long long)timestamp);
             continue;
         }
 
-        corrected[*corrected_count].timestamp = corrected_timestamp;
-        (*corrected_count)++;
+        filtered[*filtered_count] = original_readings[i];
+        (*filtered_count)++;
     }
 
-    if (*corrected_count == 0) {
-        free(corrected);
+    if (*filtered_count == 0) {
+        free(filtered);
         return NULL;
     }
 
-    ESP_LOGI(TAG, "Corrected %d/%d readings", *corrected_count, count);
-    return corrected;
-}
-
-/**
- * @brief Logs the current system time in both UTC and local timezone formats.
- */
-static void log_system_time(void)
-{
-    char time_str_buf[64];
-    struct tm timeinfo;
-    time_t now;
-    time(&now);
-
-    // Set timezone to UTC and format the time
-    setenv("TZ", "UTC", 1);
-    tzset();
-    localtime_r(&now, &timeinfo);
-    strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-
-    // Set timezone to configured local timezone to format the same time value
-    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
-    tzset();
-    localtime_r(&now, &timeinfo);
-
-    ESP_LOGI(TAG, "System time: %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
-             time_str_buf, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
-             is_system_time_valid() ? "yes" : "no");
-
-    // Set back to UTC, this is our default.
-    setenv("TZ", "UTC", 1);
-    tzset();
+    ESP_LOGI(TAG, "Filtered %d/%d readings", *filtered_count, count);
+    return filtered;
 }
 
 /**
  * @brief Create a formatted time string with both UTC and local timestamps
+ *
+ * Generates a status message string suitable for transmission to the remote API,
+ * containing both UTC and local time information with the specified prefix.
+ *
+ * @param buffer Output buffer to store the formatted string
+ * @param buffer_size Size of the output buffer
+ * @param prefix Text to prepend to the time information (e.g., "ntp set", "boot time")
  */
-static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix)
-{
-    char time_str_buf[64];
-    struct tm timeinfo;
-    time_t now;
-    time(&now);
-
-    // Set timezone to UTC and format the time
-    setenv("TZ", "UTC", 1);
-    tzset();
-    localtime_r(&now, &timeinfo);
-    strftime(time_str_buf, sizeof(time_str_buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
-
-    // Set timezone to configured local timezone to format the same time value
-    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
-    tzset();
-    localtime_r(&now, &timeinfo);
-
-    snprintf(buffer, buffer_size, "%s %s (UTC) / %d:%02d:%02d (local) [valid: %s]",
-             prefix, time_str_buf, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec,
-             is_system_time_valid() ? "yes" : "no");
-
-    // Set back to UTC, this is our default.
-    setenv("TZ", "UTC", 1);
-    tzset();
+static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix) {
+    time_format_data_t data = {
+        .buffer = buffer,
+        .buffer_size = buffer_size,
+        .prefix = prefix
+    };
+    with_local_timezone(format_time_status_callback, &data);
 }
 
 /**
- * @brief Send sensor data with retry mechanism and timestamp correction
+ * @brief Processor function to send sensor readings
  */
-static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int count,
-                                       const char* sensor_id, const char* bearer_token) {
-    if (readings == NULL || count <= 0) {
-        return true; // Nothing to send is considered success
-    }
+static bool send_readings_processor(sensor_reading_t* readings, int count) {
+    ESP_LOGI(TAG, "Sending %d batched readings.", count);
 
-    // Create corrected readings
-    int corrected_count;
-    sensor_reading_t* corrected_readings = create_corrected_readings(readings, count, &corrected_count);
+    // Create filtered readings
+    int filtered_count;
+    sensor_reading_t* filtered_readings = create_filtered_readings(readings, count, &filtered_count);
 
-    if (corrected_readings == NULL || corrected_count == 0) {
-        ESP_LOGW(TAG, "No valid readings to send after timestamp correction");
-        if (corrected_readings) free(corrected_readings);
+    if (filtered_readings == NULL || filtered_count == 0) {
+        ESP_LOGW(TAG, "No valid readings to send after timestamp filtering");
+        if (filtered_readings) free(filtered_readings);
         return true; // No valid readings is considered success
     }
 
     bool success = false;
     for (int attempt = 1; attempt <= MAX_HTTP_RETRY_ATTEMPTS; attempt++) {
-        ESP_LOGI(TAG, "Sensor data send attempt %d/%d (%d corrected readings)",
-                 attempt, MAX_HTTP_RETRY_ATTEMPTS, corrected_count);
+        ESP_LOGI(TAG, "Sensor data send attempt %d/%d (%d filtered readings)",
+                 attempt, MAX_HTTP_RETRY_ATTEMPTS, filtered_count);
 
-        // Use the version that returns proper error codes
-        esp_err_t result = send_sensor_data_with_status(corrected_readings, corrected_count, sensor_id, bearer_token);
+        esp_err_t result = send_sensor_data_with_status(filtered_readings, filtered_count,
+                                                       CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
 
         if (result == ESP_OK) {
             ESP_LOGI(TAG, "Sensor data sent successfully on attempt %d", attempt);
@@ -258,20 +387,18 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
 
         ESP_LOGE(TAG, "Sensor data attempt %d failed: %s", attempt, esp_err_to_name(result));
 
-        // Don't retry on certain errors (bad credentials, invalid data, etc.)
         if (result == ESP_ERR_INVALID_ARG || result == ESP_ERR_NOT_ALLOWED) {
             ESP_LOGE(TAG, "Non-retryable error, aborting retry attempts");
             break;
         }
 
-        // Wait before retry
         if (attempt < MAX_HTTP_RETRY_ATTEMPTS) {
             ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
         }
     }
 
-    free(corrected_readings);
+    free(filtered_readings);
 
     if (!success) {
         ESP_LOGE(TAG, "Sensor data send failed after %d attempts", MAX_HTTP_RETRY_ATTEMPTS);
@@ -281,15 +408,29 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
 }
 
 /**
- * @brief Send status update with retry mechanism - NOW WITH REAL ERROR DETECTION
+ * @brief Processor function to save sensor readings to persistent storage
+ */
+static bool save_readings_processor(sensor_reading_t* readings, int count) {
+    ESP_LOGI(TAG, "Saving %d readings to persistent storage due to Wi-Fi failure", count);
+    esp_err_t storage_err = persistent_storage_save_readings(readings, count);
+    if (storage_err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s", esp_err_to_name(storage_err));
+        return false;
+    } else {
+        ESP_LOGI(TAG, "Successfully saved readings to persistent storage");
+        return true;
+    }
+}
+
+/**
+ * @brief Send status update with retry mechanism
  */
 static bool send_status_update_with_retry(const char* status_message, const char* sensor_id,
                                          const char* bearer_token) {
     for (int attempt = 1; attempt <= MAX_HTTP_RETRY_ATTEMPTS; attempt++) {
         ESP_LOGI(TAG, "Status update send attempt %d/%d", attempt, MAX_HTTP_RETRY_ATTEMPTS);
 
-        // Use the version that returns proper error codes
-        esp_err_t result = send_status_update_with_status(status_message, sensor_id, bearer_token);
+        esp_err_t result = send_status_update(status_message, sensor_id, bearer_token);
 
         if (result == ESP_OK) {
             ESP_LOGI(TAG, "Status update sent successfully on attempt %d", attempt);
@@ -298,13 +439,11 @@ static bool send_status_update_with_retry(const char* status_message, const char
 
         ESP_LOGE(TAG, "Status update attempt %d failed: %s", attempt, esp_err_to_name(result));
 
-        // Don't retry on certain errors (bad credentials, invalid data, etc.)
         if (result == ESP_ERR_INVALID_ARG || result == ESP_ERR_NOT_ALLOWED) {
             ESP_LOGE(TAG, "Non-retryable error, aborting retry attempts");
             break;
         }
 
-        // Wait before retry
         if (attempt < MAX_HTTP_RETRY_ATTEMPTS) {
             ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
@@ -316,7 +455,7 @@ static bool send_status_update_with_retry(const char* status_message, const char
 }
 
 /**
- * @brief Attempt to send stored readings from persistent storage with timestamp correction
+ * @brief Attempt to send stored readings from persistent storage with timestamp filtering
  */
 static bool send_stored_readings(void) {
     // Check if we have any stored readings first
@@ -329,7 +468,7 @@ static bool send_stored_readings(void) {
 
     if (stored_count == 0) {
         ESP_LOGI(TAG, "No stored readings to send");
-        return true; // No readings to send is considered success
+        return true;
     }
 
     // Allocate memory for stored readings
@@ -356,8 +495,8 @@ static bool send_stored_readings(void) {
 
     ESP_LOGI(TAG, "Attempting to send %d stored readings", loaded_count);
 
-    // Send the stored readings with retry mechanism and timestamp correction
-    bool send_success = send_sensor_data_with_retry(stored_readings, loaded_count, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+    // Send the stored readings
+    bool send_success = send_readings_processor(stored_readings, loaded_count);
 
     if (send_success) {
         // Clear stored readings after successful send
@@ -376,125 +515,93 @@ static bool send_stored_readings(void) {
     return send_success;
 }
 
+/**
+ * @brief Initialize persistent storage and log status
+ */
+static bool initialize_persistent_storage(void) {
+    esp_err_t err = persistent_storage_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Persistent storage initialized successfully");
+
+    int stored_count = 0;
+    err = persistent_storage_get_count(&stored_count);
+    if (err == ESP_OK && stored_count > 0) {
+        ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
+    }
+
+    return true;
+}
+
 void task_send_data(void *arg) {
     app_context_t *context = (app_context_t *)arg;
 
     ESP_LOGI(TAG, "Data sending task started. Performing initial NTP sync...");
 
     // Initialize persistent storage
-    esp_err_t err = persistent_storage_init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
-        // Continue without persistent storage (degraded mode)
-    } else {
-        ESP_LOGI(TAG, "Persistent storage initialized successfully");
-
-        // Log how many readings are already stored
-        int stored_count = 0;
-        err = persistent_storage_get_count(&stored_count);
-        if (err == ESP_OK && stored_count > 0) {
-            ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
-        }
+    bool persistent_storage_available = initialize_persistent_storage();
+    if (!persistent_storage_available) {
+        ESP_LOGW(TAG, "Continuing without persistent storage (degraded mode)");
     }
 
-    // Perform an initial connection and time sync immediately on startup.
+    // Perform initial connection and time sync on startup
     wifi_manager_init();
     int wifi_retries = 15;
     while (!wifi_is_connected() && wifi_retries-- > 0) {
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
+    time_t last_ntp_sync_time = time(NULL);
+
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
 
-        // Send WiFi connection status with IP address
-        wifi_config_t wifi_config;
-        char ip_address[16];
-        esp_err_t ip_err = wifi_get_ip_address(ip_address, sizeof(ip_address));
+        // Send WiFi connection status
+        send_wifi_connection_status();
 
-        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
-            char status_msg[128];
-            if (ip_err == ESP_OK) {
-                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s",
-                         (char *)wifi_config.sta.ssid, ip_address);
-            } else {
-                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s",
-                         (char *)wifi_config.sta.ssid);
-            }
-            send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-        } else {
-            ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
-            if (ip_err == ESP_OK) {
-                char status_msg[64];
-                snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s", ip_address);
-                send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            } else {
-                send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            }
-        }
+        // Send device status
+        send_device_status_if_appropriate();
 
-        // Send combined device status (battery + wifi) if available
-        char device_status[256];
-        esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
-        if (device_err == ESP_OK) {
-            ESP_LOGI(TAG, "Device status: %s", device_status);
-            send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-        } else {
-            ESP_LOGW(TAG, "Failed to get device status: %s", esp_err_to_name(device_err));
-        }
+        // Perform initial NTP sync
+        handle_ntp_sync(&last_ntp_sync_time, true);
+        g_initial_boot_complete = true;
 
-        // Always attempt NTP sync on successful connection if time is invalid
-        // This is the initial boot sync, so send status update
-        sync_time_if_needed(true);
-        g_initial_boot_complete = true; // Mark initial boot as complete
-
-        // Attempt to send any stored readings from previous sessions
+        // Send any stored readings from previous sessions
         if (send_stored_readings()) {
             ESP_LOGI(TAG, "Successfully processed stored readings");
         } else {
             ESP_LOGW(TAG, "Failed to process stored readings, will retry later");
         }
 
-        // Reset the failure flag since we're connected
         context->wifi_send_failed = false;
     } else {
         ESP_LOGE(TAG, "Failed to connect to Wi-Fi for initial NTP sync. Timestamps will be incorrect until next cycle.");
         context->wifi_send_failed = true;
-        g_initial_boot_complete = true; // Mark initial boot as complete even if failed
+        g_initial_boot_complete = true;
     }
 
-    time_t last_send_time;
-    time(&last_send_time);
-    time_t last_ntp_sync_time;
-    time(&last_ntp_sync_time);
+    time_t last_send_time = time(NULL);
 
     while (1) {
-        time_t now;
-        time(&now);
+        time_t now = time(NULL);
 
         // Check if it's time to send data
         if ((now - last_send_time) >= DATA_SEND_INTERVAL_S) {
-            // Log current time status
             log_local_time_status();
 
-            // Check if it's nighttime - handle accordingly based on device
             if (is_nighttime_local()) {
                 ESP_LOGI(TAG, "Nighttime detected");
 
-                // Try deep sleep for ESP32-C3 with battery
                 if (should_enter_deep_sleep()) {
                     ESP_LOGI(TAG, "Entering deep sleep mode");
-
-                    // Give other tasks a moment to finish
                     vTaskDelay(pdMS_TO_TICKS(2000));
-
-                    // Enter deep sleep (this will restart the system when it wakes up)
                     enter_night_sleep();
-                    // This function does not return if sleep conditions are met
                 } else {
-                    // Skip transmission but stay awake (USB-powered or ESP32-S3)
                     ESP_LOGI(TAG, "Skipping data transmission for power savings (staying awake)");
-                    last_send_time = time(NULL); // Update time to prevent immediate retry
+                    last_send_time = time(NULL);
                     continue;
                 }
             }
@@ -509,48 +616,13 @@ void task_send_data(void *arg) {
             }
 
             if (wifi_is_connected()) {
-                // ALWAYS attempt NTP sync immediately if time is invalid, regardless of intervals
-                // But only send status update if it's the initial boot (which should be complete by now)
-                bool need_additional_ntp_sync = false;
+                // Handle NTP synchronization
+                handle_ntp_sync(&last_ntp_sync_time, false);
 
-                // First, sync time if needed (this handles the critical case)
-                // Don't send status update since initial boot is complete
-                sync_time_if_needed(false);
+                // Send device status update
+                send_device_status_if_appropriate();
 
-                // Then check if we need a regular interval-based sync
-                if (is_system_time_valid() && g_time_is_valid && (now - last_ntp_sync_time) >= NTP_SYNC_INTERVAL_S) {
-                    ESP_LOGI(TAG, "Regular NTP sync interval reached");
-                    need_additional_ntp_sync = true;
-                }
-
-                if (need_additional_ntp_sync) {
-                    bool ntp_success = initialize_sntp();
-                    if (ntp_success) {
-                        log_system_time();
-                        calculate_time_correction();
-                        last_ntp_sync_time = time(NULL);
-
-                        // Only log the time status, don't send to API
-                        char ntp_status_msg[128];
-                        format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
-                        ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
-                    } else {
-                        ESP_LOGE(TAG, "Regular NTP sync failed");
-                    }
-                }
-
-                // Send combined device status (battery + wifi) update every send cycle
-                char device_status[256];
-                esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
-                if (device_err == ESP_OK) {
-                    ESP_LOGI(TAG, "Periodic device status: %s", device_status);
-                    // Only send status update if battery is actually present or if we have WiFi info to avoid spam
-                    if (battery_is_present() || wifi_is_connected()) {
-                        send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-                    }
-                }
-
-                // If we previously failed to send, try to send stored readings first
+                // Send any stored readings first if previous send failed
                 if (context->wifi_send_failed) {
                     ESP_LOGI(TAG, "Previous send failed, attempting to send stored readings first");
                     if (send_stored_readings()) {
@@ -560,38 +632,14 @@ void task_send_data(void *arg) {
                     }
                 }
 
-                // Create a temporary buffer to hold data for sending
-                sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
-                if (temp_buffer == NULL) {
-                    ESP_LOGE(TAG, "Failed to allocate temporary buffer for readings");
-                    context->wifi_send_failed = true;
-                    last_send_time = time(NULL);
-                    continue;
-                }
-
-                int temp_count = 0;
-
-                // Lock the mutex to safely copy and clear the shared buffer
-                if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
-                    if (*(context->reading_idx) > 0) {
-                        memcpy(temp_buffer, context->reading_buffer, *(context->reading_idx) * sizeof(sensor_reading_t));
-                        temp_count = *(context->reading_idx);
-                        *(context->reading_idx) = 0; // Clear the buffer index
-                    }
-                    xSemaphoreGive(context->buffer_mutex);
-                }
-
+                // Send current buffered readings
                 bool send_success = true;
-                if (temp_count > 0) {
-                    ESP_LOGI(TAG, "Sending %d batched readings.", temp_count);
-                    send_success = send_sensor_data_with_retry(temp_buffer, temp_count, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                if (*(context->reading_idx) > 0) {
+                    send_success = process_buffered_readings(context, send_readings_processor);
                 } else {
                     ESP_LOGI(TAG, "No new readings to send.");
                 }
 
-                free(temp_buffer);
-
-                // Mark send result
                 context->wifi_send_failed = !send_success;
 
                 esp_wifi_disconnect();
@@ -600,42 +648,15 @@ void task_send_data(void *arg) {
 
             } else {
                 ESP_LOGE(TAG, "Failed to connect to Wi-Fi. Will retry in %d minutes.", DATA_SEND_INTERVAL_MINUTES);
-
-                // Mark send as failed
                 context->wifi_send_failed = true;
 
-                // Save current readings to persistent storage since we can't send them
-                sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
-                if (temp_buffer != NULL) {
-                    int temp_count = 0;
-
-                    // Lock the mutex to safely copy the shared buffer
-                    if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
-                        if (*(context->reading_idx) > 0) {
-                            memcpy(temp_buffer, context->reading_buffer, *(context->reading_idx) * sizeof(sensor_reading_t));
-                            temp_count = *(context->reading_idx);
-                            *(context->reading_idx) = 0; // Clear the buffer index
-                        }
-                        xSemaphoreGive(context->buffer_mutex);
-                    }
-
-                    if (temp_count > 0) {
-                        ESP_LOGI(TAG, "Saving %d readings to persistent storage due to Wi-Fi failure", temp_count);
-                        esp_err_t storage_err = persistent_storage_save_readings(temp_buffer, temp_count);
-                        if (storage_err != ESP_OK) {
-                            ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s", esp_err_to_name(storage_err));
-                        } else {
-                            ESP_LOGI(TAG, "Successfully saved readings to persistent storage");
-                        }
-                    }
-
-                    free(temp_buffer);
-                } else {
-                    ESP_LOGE(TAG, "Failed to allocate memory to save readings to persistent storage");
+                // Save current readings to persistent storage
+                if (*(context->reading_idx) > 0) {
+                    process_buffered_readings(context, save_readings_processor);
                 }
             }
-            last_send_time = time(NULL); // Update send time regardless of success
+            last_send_time = time(NULL);
         }
-        vTaskDelay(pdMS_TO_TICKS(TASK_LOOP_CHECK_INTERVAL_S * 1000)); // Check periodically
+        vTaskDelay(pdMS_TO_TICKS(TASK_LOOP_CHECK_INTERVAL_S * 1000));
     }
 }

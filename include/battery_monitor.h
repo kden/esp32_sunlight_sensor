@@ -54,3 +54,12 @@ esp_err_t battery_get_status_string(char *buffer, size_t buffer_size);
  * @return esp_err_t ESP_OK on success, error code on failure
  */
 esp_err_t get_device_status_string(char *buffer, size_t buffer_size);
+
+/**
+ * @brief Get battery data for API transmission
+ *
+ * @param voltage Pointer to store voltage value
+ * @param percentage Pointer to store percentage value
+ * @return esp_err_t ESP_OK on success, ESP_ERR_NOT_FOUND if no battery
+ */
+esp_err_t battery_get_api_data(float *voltage, int *percentage);

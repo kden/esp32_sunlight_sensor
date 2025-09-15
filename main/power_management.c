@@ -17,12 +17,8 @@
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "driver/rtc_io.h"
-#include <time.h>
 
 #define TAG "POWER_MGMT"
-
-// Wake up every 30 minutes during night to check if it's time to resume
-#define NIGHT_CHECK_INTERVAL_US (30 * 60 * 1000000ULL)  // 30 minutes in microseconds
 
 bool should_enter_deep_sleep(void) {
     // Only ESP32-C3 supports our deep sleep implementation
@@ -48,53 +44,7 @@ bool should_enter_deep_sleep(void) {
 }
 
 uint64_t calculate_sleep_duration_us(void) {
-    time_t now;
-    struct tm local_time;
-
-    time(&now);
-
-    // Convert to local timezone
-    char* old_tz = getenv("TZ");
-    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
-    tzset();
-    localtime_r(&now, &local_time);
-
-    // Restore timezone
-    if (old_tz) {
-        setenv("TZ", old_tz, 1);
-    } else {
-        unsetenv("TZ");
-    }
-    tzset();
-
-    int current_hour = local_time.tm_hour;
-    int current_min = local_time.tm_min;
-
-    // If we're not in night hours, don't sleep
-    if (!(current_hour >= CONFIG_NIGHT_START_HOUR || current_hour < CONFIG_NIGHT_END_HOUR)) {
-        return 0;
-    }
-
-    // Calculate minutes until wake time
-    int minutes_until_wake;
-
-    if (current_hour >= CONFIG_NIGHT_START_HOUR) {
-        // After night start hour, sleep until end hour next day
-        minutes_until_wake = (24 - current_hour) * 60 - current_min + (CONFIG_NIGHT_END_HOUR * 60);
-    } else {
-        // Before end hour, sleep until end hour today
-        minutes_until_wake = (CONFIG_NIGHT_END_HOUR * 60) - (current_hour * 60 + current_min);
-    }
-
-    // Convert to microseconds, but cap at our check interval
-    uint64_t sleep_duration_us = (uint64_t)minutes_until_wake * 60 * 1000000ULL;
-
-    if (sleep_duration_us > NIGHT_CHECK_INTERVAL_US) {
-        sleep_duration_us = NIGHT_CHECK_INTERVAL_US;
-    }
-
-    ESP_LOGI(TAG, "Calculated sleep duration: %llu minutes", sleep_duration_us / (60 * 1000000ULL));
-    return sleep_duration_us;
+    return calculate_night_sleep_duration_us();
 }
 
 void enter_night_sleep(void) {

@@ -30,17 +30,11 @@ static adc_channel_t battery_adc_channel;
  * @brief Map GPIO number to ADC channel for ESP32-C3
  */
 static esp_err_t gpio_to_adc_channel(int gpio_num, adc_channel_t *channel) {
-    switch (gpio_num) {
-        case 0: *channel = ADC_CHANNEL_0; break;
-        case 1: *channel = ADC_CHANNEL_1; break;
-        case 2: *channel = ADC_CHANNEL_2; break;
-        case 3: *channel = ADC_CHANNEL_3; break;
-        case 4: *channel = ADC_CHANNEL_4; break;
-        case 5: *channel = ADC_CHANNEL_5; break;
-        default:
-            ESP_LOGE(TAG, "GPIO %d is not a valid ADC pin for ESP32-C3", gpio_num);
-            return ESP_ERR_INVALID_ARG;
+    if (gpio_num < 0 || gpio_num > 5) {
+        ESP_LOGE(TAG, "GPIO %d is not a valid ADC pin for ESP32-C3", gpio_num);
+        return ESP_ERR_INVALID_ARG;
     }
+    *channel = (adc_channel_t)gpio_num;  // Direct mapping for ESP32-C3
     return ESP_OK;
 }
 
@@ -233,6 +227,34 @@ esp_err_t get_device_status_string(char *buffer, size_t buffer_size) {
         snprintf(buffer, buffer_size, "battery error | %s", wifi_status);
     } else {
         snprintf(buffer, buffer_size, "battery error | wifi error");
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t battery_get_api_data(float *voltage, int *percentage) {
+    if (voltage == NULL || percentage == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!battery_is_present()) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    esp_err_t ret = battery_get_voltage(voltage);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    // Calculate percentage (same logic as battery_get_status_string)
+    if (*voltage >= 4.0) {
+        *percentage = 100;
+    } else if (*voltage >= 3.7) {
+        *percentage = (int)(50.0 + (*voltage - 3.7) * (50.0 / 0.3));
+    } else if (*voltage >= 3.3) {
+        *percentage = (int)((*voltage - 3.3) * (50.0 / 0.4));
+    } else {
+        *percentage = 0;
     }
 
     return ESP_OK;

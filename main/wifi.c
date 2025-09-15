@@ -27,6 +27,8 @@
 
 static const char* wifi_reason_to_str(uint8_t reason)
 {
+
+#if CONFIG_LOG_MAXIMUM_LEVEL >= 3
     switch (reason)
     {
     case WIFI_REASON_UNSPECIFIED: return "wifi_reason_unspecified";
@@ -91,6 +93,11 @@ static const char* wifi_reason_to_str(uint8_t reason)
     case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD: return "wifi_reason_no_ap_found_in_rssi_threshold";
     default: return "Unknown reason";
     }
+#else
+    // For builds with low verbosity, return an empty string.
+    // The ESP_LOGE call will still print the numeric reason code.
+    return "";
+#endif
 }
 
 

@@ -19,6 +19,9 @@
 #include <time.h>
 #include <string.h>
 
+#include "battery_monitor.h"
+#include "wifi_monitor.h"
+
 #define TAG "HTTP"
 #define MAX_READINGS_PER_CHUNK 50  // Send at most 50 readings per HTTP request
 
@@ -164,16 +167,6 @@ static esp_err_t _send_json_payload_with_status(const char* json_payload, const 
 }
 
 /**
- * @brief Legacy wrapper function for backward compatibility
- */
-void __attribute__((weak)) _send_json_payload(const char* json_payload, const char* bearer_token) {
-    esp_err_t result = _send_json_payload_with_status(json_payload, bearer_token);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "JSON payload send failed: %s", esp_err_to_name(result));
-    }
-}
-
-/**
  * @brief Internal function to send a single chunk of sensor data
  */
 static esp_err_t _send_sensor_data_chunk(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
@@ -309,7 +302,7 @@ esp_err_t send_sensor_data_with_status(const sensor_reading_t* readings, int cou
     return final_result;
 }
 
-esp_err_t send_status_update_with_status(const char* status_message, const char* sensor_id, const char* bearer_token) {
+esp_err_t send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
     if (status_message == NULL || sensor_id == NULL || bearer_token == NULL) {
         ESP_LOGE(TAG, "Invalid parameters for status update");
         return ESP_ERR_INVALID_ARG;
@@ -366,17 +359,81 @@ cleanup:
     return result;
 }
 
-// Legacy functions for backward compatibility
-void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
-    esp_err_t result = send_sensor_data_with_status(readings, count, sensor_id, bearer_token);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "Sensor data send failed: %s", esp_err_to_name(result));
+esp_err_t send_battery_status_update(const char* sensor_id, const char* bearer_token) {
+    if (sensor_id == NULL || bearer_token == NULL) {
+        ESP_LOGE(TAG, "Invalid parameters for battery status update");
+        return ESP_ERR_INVALID_ARG;
     }
-}
 
-void send_status_update(const char* status_message, const char* sensor_id, const char* bearer_token) {
-    esp_err_t result = send_status_update_with_status(status_message, sensor_id, bearer_token);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "Status update send failed: %s", esp_err_to_name(result));
+    float voltage;
+    int percentage;
+    int8_t rssi;
+
+    // Get battery data - return error if no battery
+    esp_err_t battery_err = battery_get_api_data(&voltage, &percentage);
+    if (battery_err != ESP_OK) {
+        return battery_err; // No battery or read error
     }
+
+    // Get WiFi data
+    esp_err_t wifi_err = wifi_get_rssi(&rssi);
+
+    cJSON *root_array = NULL;
+    char *json_payload = NULL;
+    esp_err_t result = ESP_FAIL;
+
+    root_array = cJSON_CreateArray();
+    if (root_array == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON array for battery status update");
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON *status_object = cJSON_CreateObject();
+    if (status_object == NULL) {
+        ESP_LOGE(TAG, "Failed to create battery status object");
+        result = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    time_t now;
+    time(&now);
+    char timestamp_str[32];
+    strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
+
+    cJSON_AddStringToObject(status_object, "sensor_id", sensor_id);
+    cJSON_AddStringToObject(status_object, "timestamp", timestamp_str);
+    cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET);
+    cJSON_AddStringToObject(status_object, "status", "battery");
+
+    // Add numeric battery fields
+    cJSON_AddNumberToObject(status_object, "battery_voltage", voltage);
+    cJSON_AddNumberToObject(status_object, "battery_percent", percentage);
+
+    // Add WiFi strength if available
+    if (wifi_err == ESP_OK) {
+        cJSON_AddNumberToObject(status_object, "wifi_dbm", rssi);
+    }
+
+    // Add the Git commit info
+    cJSON_AddStringToObject(status_object, "commit_sha", GIT_COMMIT_SHA);
+    cJSON_AddStringToObject(status_object, "commit_timestamp", GIT_COMMIT_TIMESTAMP);
+
+    cJSON_AddItemToArray(root_array, status_object);
+
+    json_payload = cJSON_Print(root_array);
+    if (json_payload == NULL) {
+        ESP_LOGE(TAG, "Failed to print JSON payload for battery status update");
+        result = ESP_ERR_NO_MEM;
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Sending battery status update");
+    ESP_LOGD(TAG, "Battery Status JSON Payload: %s", json_payload);
+
+    result = _send_json_payload_with_status(json_payload, bearer_token);
+
+cleanup:
+    if (root_array) cJSON_Delete(root_array);
+    if (json_payload) free(json_payload);
+    return result;
 }

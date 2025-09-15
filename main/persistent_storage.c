@@ -229,10 +229,34 @@ esp_err_t persistent_storage_get_count(int* count) {
     if (count == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    *count = 0; // Default to zero
+    *count = 0;
 
-    // This function now sums up readings from all batches
-    // FIX: Declare the large buffer as 'static' to move it off the stack
-    static sensor_reading_t temp_buffer[PERSISTENT_STORAGE_MAX_READINGS];
-    return persistent_storage_load_readings(temp_buffer, PERSISTENT_STORAGE_MAX_READINGS, count);
+    if (xSemaphoreTake(s_nvs_mutex, portMAX_DELAY) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    int32_t batch_count = 0;
+    esp_err_t err = nvs_get_i32(s_nvs_handle, KEY_BATCH_COUNT, &batch_count);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        xSemaphoreGive(s_nvs_mutex);
+        return ESP_OK; // No batches, count is 0
+    } else if (err != ESP_OK) {
+        xSemaphoreGive(s_nvs_mutex);
+        return err;
+    }
+
+    for (int i = 0; i < batch_count; i++) {
+        char batch_key[32];
+        snprintf(batch_key, sizeof(batch_key), "%s%d", KEY_BATCH_PREFIX, i);
+
+        size_t required_size = 0;
+        // Get the size of the blob without reading its contents
+        err = nvs_get_blob(s_nvs_handle, batch_key, NULL, &required_size);
+        if (err == ESP_OK) {
+            *count += required_size / sizeof(sensor_reading_t);
+        }
+    }
+
+    xSemaphoreGive(s_nvs_mutex);
+    return ESP_OK;
 }

@@ -37,9 +37,6 @@
 
 #define TAG "MAIN"
 
-#define MAX_WIFI_NETWORKS 5
-#define MAX_SSID_LEN 32
-#define MAX_PASS_LEN 64
 #define BATCH_POST_INTERVAL_S (5 * 60) // 5 minutes
 // We read every 15 seconds
 #define READING_INTERVAL_S 15

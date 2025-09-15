@@ -40,48 +40,14 @@
 #include <driver/i2c_master.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include "generated_config.h"
 
 #define TSK_MINIMAL_STACK_SIZE         (1024)
 #define I2C0_MASTER_PORT               I2C_NUM_0
 
-// Provide default pin definitions if they are not set by the build environment
-
-#ifndef CONFIG_BATTERY_ADC_GPIO
-#define CONFIG_BATTERY_ADC_GPIO 2
-#endif
-
-#ifndef CONFIG_SENSOR_SDA_GPIO
-#define CONFIG_SENSOR_SDA_GPIO 21
-#endif
-
-#ifndef CONFIG_SENSOR_SCL_GPIO
-#define CONFIG_SENSOR_SCL_GPIO 22
-#endif
-
-// Nighttime power saving configuration
-#ifndef CONFIG_NIGHT_START_HOUR
-#define CONFIG_NIGHT_START_HOUR 22  // Default: 10 PM
-#endif
-
-#ifndef CONFIG_NIGHT_END_HOUR
-#define CONFIG_NIGHT_END_HOUR 4     // Default: 4 AM
-#endif
-
-#ifndef CONFIG_LOCAL_TIMEZONE
-#define CONFIG_LOCAL_TIMEZONE "CST6CDT,M3.2.0,M11.1.0"  // Default: Chicago timezone
-#endif
-
 #define I2C0_TASK_SAMPLING_RATE        (10) // seconds
 #define I2C0_TASK_STACK_SIZE           (TSK_MINIMAL_STACK_SIZE * 8)
 #define I2C0_TASK_PRIORITY             (tskIDLE_PRIORITY + 2)
-
-#define UTILS_TASK_SAMPLING_RATE       (30) // seconds
-#define UTILS_TASK_STACK_SIZE          (TSK_MINIMAL_STACK_SIZE * 8)
-#define UTILS_TASK_PRIORITY            (tskIDLE_PRIORITY + 2)
-
-#define SCH_TASK_SAMPLING_RATE         (30) // seconds
-#define SCH_TASK_STACK_SIZE            (TSK_MINIMAL_STACK_SIZE * 8)
-#define SCH_TASK_PRIORITY              (tskIDLE_PRIORITY + 2)
 
 #define APP_TAG                         "SUNLIGHT SENSOR [APP]"
 
@@ -90,17 +56,6 @@
 #define BATTERY_PRESENT_THRESHOLD_V 2.5       // Minimum voltage to consider battery present
 #define BATTERY_LOW_THRESHOLD_V     3.2       // Low battery warning threshold
 #define BATTERY_CRITICAL_THRESHOLD_V 3.0      // Critical battery threshold
-
-// macros
-
-#define I2C0_MASTER_CONFIG_DEFAULT {                                \
-        .clk_source                     = I2C_CLK_SRC_DEFAULT,      \
-        .i2c_port                       = I2C0_MASTER_PORT,         \
-        .scl_io_num                     = CONFIG_SENSOR_SCL_GPIO,   \
-        .sda_io_num                     = CONFIG_SENSOR_SDA_GPIO,   \
-        .glitch_ignore_cnt              = 7,                        \
-        .flags.enable_internal_pullup   = true, }
-
 
 static inline void vTaskDelaySecUntil(TickType_t *previousWakeTime, const uint sec) {
     const TickType_t xFrequency = ((sec * 1000) / portTICK_PERIOD_MS);
