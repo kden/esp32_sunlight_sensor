@@ -79,12 +79,12 @@ void app_main(void)
         ESP_LOGW(TAG, "Failed to initialize battery monitor: %s", esp_err_to_name(battery_err));
         ESP_LOGW(TAG, "Continuing without battery monitoring (this is normal for USB-powered devices)");
     } else {
-        ESP_LOGI(TAG, "Battery monitoring initialized successfully");
+        ESP_LOGD(TAG, "Battery monitoring initialized successfully");
 
         // Log initial battery status
         char battery_status[128];
         if (battery_get_status_string(battery_status, sizeof(battery_status)) == ESP_OK) {
-            ESP_LOGI(TAG, "Initial %s", battery_status);
+            ESP_LOGD(TAG, "Initial %s", battery_status);
         }
     }
 
@@ -100,9 +100,9 @@ void app_main(void)
     err = persistent_storage_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
-        ESP_LOGW(TAG, "Continuing without persistent storage (readings will be lost on Wi-Fi failure)");
+        ESP_LOGD(TAG, "Continuing without persistent storage (readings will be lost on Wi-Fi failure)");
     } else {
-        ESP_LOGI(TAG, "Persistent storage initialized successfully");
+        ESP_LOGD(TAG, "Persistent storage initialized successfully");
 
         // Log how many readings are already stored
         int stored_count = 0;
@@ -120,12 +120,12 @@ void app_main(void)
 
     // Check if we should immediately go back to sleep (timer wakeup during night)
     if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER && is_nighttime_local()) {
-        ESP_LOGI(TAG, "Timer wakeup during nighttime - checking if it's time to resume normal operation");
+        ESP_LOGD(TAG, "Timer wakeup during nighttime - checking if it's time to resume normal operation");
 
         // Try to enter sleep again - function will check conditions
         enter_night_sleep();
         // If we reach here, conditions weren't met for sleep (e.g., no battery, time changed)
-        ESP_LOGI(TAG, "Sleep conditions no longer met - continuing with normal operation");
+        ESP_LOGD(TAG, "Sleep conditions no longer met - continuing with normal operation");
     }
 
     // Populate the rest of the application context
@@ -148,5 +148,5 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(10000));
     xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
-    ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
+    ESP_LOGD(TAG, "Initialized. Tasks are running.");
 }

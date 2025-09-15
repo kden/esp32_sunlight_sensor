@@ -29,3 +29,5 @@ typedef struct {
     bool wifi_send_failed;  // Flag to indicate if the last Wi-Fi send failed
 } app_context_t;
 
+esp_err_t send_device_status_with_status(const device_status_t* status,
+                                        const char* sensor_id, const char* bearer_token);

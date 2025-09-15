@@ -19,6 +19,6 @@ direct_dependencies:
 - esp_idf_lib_helpers
 - i2cdev
 - idf
-manifest_hash: c3f2eafcf379847e3547bef29bf9584ec9ce96928f9ddbba0d3dd55a577655ff
+manifest_hash: ab88d2799f7269c668ea729c329d9bb19c95758c9d48d244c1e714f7d6053ee3
 target: esp32c3
 version: 2.0.0

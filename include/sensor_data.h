@@ -25,7 +25,6 @@ typedef struct {
 
 typedef struct {
     time_t timestamp;
-    float voltage;
-    bool is_present;
-    float percentage;  // Estimated percentage
-} battery_reading_t;
+    float battery_volts;
+    int wifi_dbm;
+} device_status_t;

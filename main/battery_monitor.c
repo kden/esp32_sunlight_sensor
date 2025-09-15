@@ -17,6 +17,7 @@
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include <math.h>
+#include "wifi.h"
 #include "wifi_monitor.h"
 
 #define TAG "BATTERY_MONITOR"
@@ -54,7 +55,7 @@ esp_err_t battery_monitor_init(void) {
         return ret;
     }
 
-    ESP_LOGI(TAG, "Using GPIO %d (ADC channel %d) for battery monitoring",
+    ESP_LOGD(TAG, "Using GPIO %d (ADC channel %d) for battery monitoring",
              CONFIG_BATTERY_ADC_GPIO, battery_adc_channel);
 
     // Initialize ADC1
@@ -88,13 +89,13 @@ esp_err_t battery_monitor_init(void) {
     ret = adc_cali_create_scheme_curve_fitting(&cali_config, &adc1_cali_handle);
     if (ret == ESP_OK) {
         adc_calibrated = true;
-        ESP_LOGI(TAG, "ADC calibration scheme curve fitting initialized");
+        ESP_LOGD(TAG, "ADC calibration scheme curve fitting initialized");
     } else {
         ESP_LOGW(TAG, "ADC calibration failed, using raw values: %s", esp_err_to_name(ret));
         adc_calibrated = false;
     }
 
-    ESP_LOGI(TAG, "Battery monitoring initialized");
+    ESP_LOGD(TAG, "Battery monitoring initialized");
     return ESP_OK;
 }
 
@@ -139,7 +140,7 @@ esp_err_t battery_get_voltage(float *voltage) {
 
     int avg_raw = total_raw / num_samples;
 
-    ESP_LOGI(TAG, "ADC readings - avg: %d, min: %d, max: %d, range: %d",
+    ESP_LOGD(TAG, "ADC readings - avg: %d, min: %d, max: %d, range: %d",
              avg_raw, min_raw, max_raw, max_raw - min_raw);
 
     if (adc_calibrated) {
@@ -154,14 +155,14 @@ esp_err_t battery_get_voltage(float *voltage) {
         float adc_voltage = voltage_mv / 1000.0;
         *voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
 
-        ESP_LOGI(TAG, "ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
+        ESP_LOGD(TAG, "ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
     } else {
         // Fallback: use raw reading with approximate conversion
         // For ESP32-C3 with 12-bit ADC and 3.3V reference
         float adc_voltage = (avg_raw / 4095.0) * 3.3;
         *voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
 
-        ESP_LOGI(TAG, "Raw ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
+        ESP_LOGD(TAG, "Raw ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
     }
 
     ESP_LOGI(TAG, "Final battery voltage: %.3fV (threshold: %.1fV)", *voltage, BATTERY_PRESENT_THRESHOLD_V);
@@ -233,6 +234,43 @@ esp_err_t get_device_status_string(char *buffer, size_t buffer_size) {
         snprintf(buffer, buffer_size, "battery error | %s", wifi_status);
     } else {
         snprintf(buffer, buffer_size, "battery error | wifi error");
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t get_device_status_data(device_status_t *status) {
+    if (status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Initialize the status structure
+    memset(status, 0, sizeof(device_status_t));
+    time(&status->timestamp);
+
+    // Get battery voltage if available
+    if (battery_is_present()) {
+        esp_err_t battery_err = battery_get_voltage(&status->battery_volts);
+        if (battery_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to get battery voltage: %s", esp_err_to_name(battery_err));
+            status->battery_volts = 0.0; // Set to 0 to indicate unavailable
+        }
+    } else {
+        status->battery_volts = 0.0; // No battery present
+    }
+
+    // Get WiFi signal strength if connected
+    if (wifi_is_connected()) {
+        int8_t wifi_rssi;  // Use int8_t instead of int
+        esp_err_t wifi_err = wifi_get_rssi(&wifi_rssi);
+        if (wifi_err == ESP_OK) {
+            status->wifi_dbm = (int)wifi_rssi;  // Convert to int for storage
+        } else {
+            ESP_LOGW(TAG, "Failed to get WiFi RSSI: %s", esp_err_to_name(wifi_err));
+            status->wifi_dbm = 0; // Set to 0 to indicate unavailable
+        }
+    } else {
+        status->wifi_dbm = 0; // Not connected
     }
 
     return ESP_OK;

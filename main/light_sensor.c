@@ -45,7 +45,7 @@ esp_err_t init_light_sensor(i2c_dev_t **dev)
     // Pass the address of the static device descriptor back to the caller
     *dev = &light_sensor_dev;
 
-    ESP_LOGI(TAG, "BH1750 light sensor initialized successfully");
+    ESP_LOGD(TAG, "BH1750 light sensor initialized successfully");
 
     return ESP_OK;
 }

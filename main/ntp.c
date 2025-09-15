@@ -59,7 +59,7 @@ bool initialize_sntp(void)
         }
 
         retry++;
-        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d) [sync_status=%d, timestamp=%lld]",
+        ESP_LOGD(TAG, "Waiting for system time to be set... (%d/%d) [sync_status=%d, timestamp=%lld]",
                  retry, retry_count, esp_sntp_get_sync_status(), (long long)now);
         vTaskDelay(2000 / portTICK_PERIOD_MS);
     }

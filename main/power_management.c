@@ -43,7 +43,7 @@ bool should_enter_deep_sleep(void) {
         return false;
     }
 
-    ESP_LOGI(TAG, "Conditions met for deep sleep: ESP32-C3 + battery + nighttime");
+    ESP_LOGD(TAG, "Conditions met for deep sleep: ESP32-C3 + battery + nighttime");
     return true;
 }
 
@@ -93,7 +93,7 @@ uint64_t calculate_sleep_duration_us(void) {
         sleep_duration_us = NIGHT_CHECK_INTERVAL_US;
     }
 
-    ESP_LOGI(TAG, "Calculated sleep duration: %llu minutes", sleep_duration_us / (60 * 1000000ULL));
+    ESP_LOGD(TAG, "Calculated sleep duration: %llu minutes", sleep_duration_us / (60 * 1000000ULL));
     return sleep_duration_us;
 }
 

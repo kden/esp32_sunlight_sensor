@@ -27,9 +27,6 @@
 
 /**
  * @brief Converts the esp_reset_reason_t enum to a human-readable string.
- *
- * @param reason The reset reason enum from the ESP-IDF.
- * @return A constant string describing the reason.
  */
 static const char* reset_reason_to_str(esp_reset_reason_t reason)
 {
@@ -60,10 +57,8 @@ void check_and_report_crash(void)
     esp_reset_reason_t reason = esp_reset_reason();
     ESP_LOGI(TAG, "Device reset reason: %s (%d)", reset_reason_to_str(reason), reason);
 
-    // We only want to report on unexpected, crash-related resets.
-    // Normal events like power-on or software restart are ignored.
-    if (reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason ==
-        ESP_RST_CPU_LOCKUP)
+    // Only report crash-related resets
+    if (reason == ESP_RST_PANIC || reason == ESP_RST_TASK_WDT || reason == ESP_RST_INT_WDT || reason == ESP_RST_CPU_LOCKUP)
     {
         ESP_LOGW(TAG, "Device rebooted from a crash. Attempting to report...");
 
@@ -71,8 +66,7 @@ void check_and_report_crash(void)
         snprintf(status_message, sizeof(status_message), "CRASH detected. Reset reason: %s",
                  reset_reason_to_str(reason));
 
-        // Attempt to connect to Wi-Fi to send the report.
-        // This block is self-contained and manages its own connection lifecycle.
+        // Attempt to connect to Wi-Fi to send the report
         wifi_manager_init();
         int retries = 15;
         while (!wifi_is_connected() && retries-- > 0)
@@ -83,13 +77,18 @@ void check_and_report_crash(void)
         if (wifi_is_connected())
         {
             ESP_LOGI(TAG, "Wi-Fi connected. Sending crash report...");
-            send_status_update(status_message, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            ESP_LOGI(TAG, "Crash report sent successfully.");
+            // Change this line to use the new function name:
+            esp_err_t result = send_status_update_with_status(status_message, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            if (result == ESP_OK) {
+                ESP_LOGI(TAG, "Crash report sent successfully.");
+            } else {
+                ESP_LOGE(TAG, "Failed to send crash report: %s", esp_err_to_name(result));
+            }
 
-            // Disconnect Wi-Fi to allow the main application logic to manage power.
+            // Disconnect Wi-Fi to allow the main application logic to manage power
             esp_wifi_disconnect();
             esp_wifi_stop();
-            ESP_LOGI(TAG, "Wi-Fi disconnected after sending report.");
+            ESP_LOGD(TAG, "Wi-Fi disconnected after sending report.");
         }
         else
         {
@@ -98,6 +97,6 @@ void check_and_report_crash(void)
     }
     else
     {
-        ESP_LOGI(TAG, "Normal boot reason. No crash report needed.");
+        ESP_LOGD(TAG, "Normal boot reason. No crash report needed.");
     }
 }

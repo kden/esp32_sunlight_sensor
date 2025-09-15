@@ -66,7 +66,7 @@ static bool sync_time_if_needed(bool send_status_update) {
                 format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
                 send_status_update_with_retry(ntp_status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
             } else {
-                ESP_LOGI(TAG, "NTP sync successful (status not sent - post-boot sync)");
+                ESP_LOGD(TAG, "NTP sync successful (status not sent - post-boot sync)");
             }
             return true;
         } else {
@@ -101,7 +101,7 @@ static void calculate_time_correction(void) {
         // If we had an invalid time before and now have valid time,
         // we can't really calculate a meaningful correction for past readings
         // since the old timestamps were essentially random
-        ESP_LOGI(TAG, "Time correction established. Future readings will use correct time.");
+        ESP_LOGD(TAG, "Time correction established. Future readings will use correct time.");
         g_time_is_valid = true;
         g_time_correction_offset = 0; // No correction needed for future readings
     }
@@ -247,7 +247,6 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
         ESP_LOGI(TAG, "Sensor data send attempt %d/%d (%d corrected readings)",
                  attempt, MAX_HTTP_RETRY_ATTEMPTS, corrected_count);
 
-        // Use the version that returns proper error codes
         esp_err_t result = send_sensor_data_with_status(corrected_readings, corrected_count, sensor_id, bearer_token);
 
         if (result == ESP_OK) {
@@ -266,7 +265,7 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
 
         // Wait before retry
         if (attempt < MAX_HTTP_RETRY_ATTEMPTS) {
-            ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
+            ESP_LOGD(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
         }
     }
@@ -281,14 +280,13 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
 }
 
 /**
- * @brief Send status update with retry mechanism - NOW WITH REAL ERROR DETECTION
+ * @brief Send status update with retry mechanism
  */
 static bool send_status_update_with_retry(const char* status_message, const char* sensor_id,
                                          const char* bearer_token) {
     for (int attempt = 1; attempt <= MAX_HTTP_RETRY_ATTEMPTS; attempt++) {
         ESP_LOGI(TAG, "Status update send attempt %d/%d", attempt, MAX_HTTP_RETRY_ATTEMPTS);
 
-        // Use the version that returns proper error codes
         esp_err_t result = send_status_update_with_status(status_message, sensor_id, bearer_token);
 
         if (result == ESP_OK) {
@@ -306,7 +304,7 @@ static bool send_status_update_with_retry(const char* status_message, const char
 
         // Wait before retry
         if (attempt < MAX_HTTP_RETRY_ATTEMPTS) {
-            ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
+            ESP_LOGD(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
             vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
         }
     }
@@ -376,23 +374,28 @@ static bool send_stored_readings(void) {
     return send_success;
 }
 
-void task_send_data(void *arg) {
-    app_context_t *context = (app_context_t *)arg;
+void task_send_data(void* arg)
+{
+    app_context_t* context = (app_context_t*)arg;
 
     ESP_LOGI(TAG, "Data sending task started. Performing initial NTP sync...");
 
     // Initialize persistent storage
     esp_err_t err = persistent_storage_init();
-    if (err != ESP_OK) {
+    if (err != ESP_OK)
+    {
         ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
         // Continue without persistent storage (degraded mode)
-    } else {
-        ESP_LOGI(TAG, "Persistent storage initialized successfully");
+    }
+    else
+    {
+        ESP_LOGD(TAG, "Persistent storage initialized successfully");
 
         // Log how many readings are already stored
         int stored_count = 0;
         err = persistent_storage_get_count(&stored_count);
-        if (err == ESP_OK && stored_count > 0) {
+        if (err == ESP_OK && stored_count > 0)
+        {
             ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
         }
     }
@@ -400,11 +403,13 @@ void task_send_data(void *arg) {
     // Perform an initial connection and time sync immediately on startup.
     wifi_manager_init();
     int wifi_retries = 15;
-    while (!wifi_is_connected() && wifi_retries-- > 0) {
+    while (!wifi_is_connected() && wifi_retries-- > 0)
+    {
         vTaskDelay(pdMS_TO_TICKS(2000));
     }
 
-    if (wifi_is_connected()) {
+    if (wifi_is_connected())
+    {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
 
         // Send WiFi connection status with IP address
@@ -412,35 +417,90 @@ void task_send_data(void *arg) {
         char ip_address[16];
         esp_err_t ip_err = wifi_get_ip_address(ip_address, sizeof(ip_address));
 
-        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
+        if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK)
+        {
             char status_msg[128];
-            if (ip_err == ESP_OK) {
+            if (ip_err == ESP_OK)
+            {
                 snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s",
-                         (char *)wifi_config.sta.ssid, ip_address);
-            } else {
+                         (char*)wifi_config.sta.ssid, ip_address);
+            }
+            else
+            {
                 snprintf(status_msg, sizeof(status_msg), "wifi connected to %s",
-                         (char *)wifi_config.sta.ssid);
+                         (char*)wifi_config.sta.ssid);
             }
             send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-        } else {
+        }
+        else
+        {
             ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
-            if (ip_err == ESP_OK) {
+            if (ip_err == ESP_OK)
+            {
                 char status_msg[64];
                 snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s", ip_address);
                 send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-            } else {
+            }
+            else
+            {
                 send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
             }
         }
 
         // Send combined device status (battery + wifi) if available
-        char device_status[256];
-        esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
-        if (device_err == ESP_OK) {
-            ESP_LOGI(TAG, "Device status: %s", device_status);
-            send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-        } else {
-            ESP_LOGW(TAG, "Failed to get device status: %s", esp_err_to_name(device_err));
+        device_status_t device_status_data;
+        esp_err_t device_err = get_device_status_data(&device_status_data);
+        if (device_err == ESP_OK)
+        {
+            // Only send if we have meaningful data (battery present or WiFi connected)
+            if (device_status_data.battery_volts > 0.0 || device_status_data.wifi_dbm != 0)
+            {
+                ESP_LOGI(TAG, "Sending device status: battery=%.2fV, wifi=%ddBm",
+                         device_status_data.battery_volts, device_status_data.wifi_dbm);
+
+                bool device_send_success = false;
+                for (int attempt = 1; attempt <= MAX_HTTP_RETRY_ATTEMPTS; attempt++)
+                {
+                    ESP_LOGI(TAG, "Device status send attempt %d/%d", attempt, MAX_HTTP_RETRY_ATTEMPTS);
+
+                    esp_err_t result = send_device_status_with_status(&device_status_data, CONFIG_SENSOR_ID,
+                                                                      CONFIG_BEARER_TOKEN);
+
+                    if (result == ESP_OK)
+                    {
+                        ESP_LOGI(TAG, "Device status sent successfully on attempt %d", attempt);
+                        device_send_success = true;
+                        break;
+                    }
+
+                    ESP_LOGE(TAG, "Device status attempt %d failed: %s", attempt, esp_err_to_name(result));
+
+                    if (result == ESP_ERR_INVALID_ARG || result == ESP_ERR_NOT_ALLOWED)
+                    {
+                        ESP_LOGE(TAG, "Non-retryable error, aborting retry attempts");
+                        break;
+                    }
+
+                    if (attempt < MAX_HTTP_RETRY_ATTEMPTS)
+                    {
+                        ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
+                        vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
+                    }
+                }
+
+                if (!device_send_success)
+                {
+                    ESP_LOGE(TAG, "Device status send failed after %d attempts", MAX_HTTP_RETRY_ATTEMPTS);
+                }
+            }
+            else
+            {
+                ESP_LOGD(TAG, "No meaningful device status data to send (no battery, not connected to WiFi)");
+            }
+        }
+        else
+        {
+            ESP_LOGW(TAG, "Failed to get device status data: %s", esp_err_to_name(device_err));
         }
 
         // Always attempt NTP sync on successful connection if time is invalid
@@ -449,16 +509,22 @@ void task_send_data(void *arg) {
         g_initial_boot_complete = true; // Mark initial boot as complete
 
         // Attempt to send any stored readings from previous sessions
-        if (send_stored_readings()) {
+        if (send_stored_readings())
+        {
             ESP_LOGI(TAG, "Successfully processed stored readings");
-        } else {
+        }
+        else
+        {
             ESP_LOGW(TAG, "Failed to process stored readings, will retry later");
         }
 
         // Reset the failure flag since we're connected
         context->wifi_send_failed = false;
-    } else {
-        ESP_LOGE(TAG, "Failed to connect to Wi-Fi for initial NTP sync. Timestamps will be incorrect until next cycle.");
+    }
+    else
+    {
+        ESP_LOGE(TAG, "Failed to connect to Wi-Fi for initial NTP sync. Timestamps will be incorrect until next cycle.")
+        ;
         context->wifi_send_failed = true;
         g_initial_boot_complete = true; // Mark initial boot as complete even if failed
     }
@@ -468,22 +534,26 @@ void task_send_data(void *arg) {
     time_t last_ntp_sync_time;
     time(&last_ntp_sync_time);
 
-    while (1) {
+    while (1)
+    {
         time_t now;
         time(&now);
 
         // Check if it's time to send data
-        if ((now - last_send_time) >= DATA_SEND_INTERVAL_S) {
+        if ((now - last_send_time) >= DATA_SEND_INTERVAL_S)
+        {
             // Log current time status
             log_local_time_status();
 
             // Check if it's nighttime - handle accordingly based on device
-            if (is_nighttime_local()) {
-                ESP_LOGI(TAG, "Nighttime detected");
+            if (is_nighttime_local())
+            {
+                ESP_LOGD(TAG, "Nighttime detected");
 
                 // Try deep sleep for ESP32-C3 with battery
-                if (should_enter_deep_sleep()) {
-                    ESP_LOGI(TAG, "Entering deep sleep mode");
+                if (should_enter_deep_sleep())
+                {
+                    ESP_LOGD(TAG, "Entering deep sleep mode");
 
                     // Give other tasks a moment to finish
                     vTaskDelay(pdMS_TO_TICKS(2000));
@@ -491,9 +561,11 @@ void task_send_data(void *arg) {
                     // Enter deep sleep (this will restart the system when it wakes up)
                     enter_night_sleep();
                     // This function does not return if sleep conditions are met
-                } else {
+                }
+                else
+                {
                     // Skip transmission but stay awake (USB-powered or ESP32-S3)
-                    ESP_LOGI(TAG, "Skipping data transmission for power savings (staying awake)");
+                    ESP_LOGD(TAG, "Skipping data transmission for power savings (staying awake)");
                     last_send_time = time(NULL); // Update time to prevent immediate retry
                     continue;
                 }
@@ -504,11 +576,13 @@ void task_send_data(void *arg) {
 
             // Wait for connection
             int connection_retries = 15;
-            while (!wifi_is_connected() && connection_retries-- > 0) {
+            while (!wifi_is_connected() && connection_retries-- > 0)
+            {
                 vTaskDelay(pdMS_TO_TICKS(2000));
             }
 
-            if (wifi_is_connected()) {
+            if (wifi_is_connected())
+            {
                 // ALWAYS attempt NTP sync immediately if time is invalid, regardless of intervals
                 // But only send status update if it's the initial boot (which should be complete by now)
                 bool need_additional_ntp_sync = false;
@@ -518,14 +592,17 @@ void task_send_data(void *arg) {
                 sync_time_if_needed(false);
 
                 // Then check if we need a regular interval-based sync
-                if (is_system_time_valid() && g_time_is_valid && (now - last_ntp_sync_time) >= NTP_SYNC_INTERVAL_S) {
+                if (is_system_time_valid() && g_time_is_valid && (now - last_ntp_sync_time) >= NTP_SYNC_INTERVAL_S)
+                {
                     ESP_LOGI(TAG, "Regular NTP sync interval reached");
                     need_additional_ntp_sync = true;
                 }
 
-                if (need_additional_ntp_sync) {
+                if (need_additional_ntp_sync)
+                {
                     bool ntp_success = initialize_sntp();
-                    if (ntp_success) {
+                    if (ntp_success)
+                    {
                         log_system_time();
                         calculate_time_correction();
                         last_ntp_sync_time = time(NULL);
@@ -533,8 +610,10 @@ void task_send_data(void *arg) {
                         // Only log the time status, don't send to API
                         char ntp_status_msg[128];
                         format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
-                        ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
-                    } else {
+                        ESP_LOGD(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
+                    }
+                    else
+                    {
                         ESP_LOGE(TAG, "Regular NTP sync failed");
                     }
                 }
@@ -542,27 +621,34 @@ void task_send_data(void *arg) {
                 // Send combined device status (battery + wifi) update every send cycle
                 char device_status[256];
                 esp_err_t device_err = get_device_status_string(device_status, sizeof(device_status));
-                if (device_err == ESP_OK) {
-                    ESP_LOGI(TAG, "Periodic device status: %s", device_status);
+                if (device_err == ESP_OK)
+                {
+                    ESP_LOGD(TAG, "Periodic device status: %s", device_status);
                     // Only send status update if battery is actually present or if we have WiFi info to avoid spam
-                    if (battery_is_present() || wifi_is_connected()) {
+                    if (battery_is_present() || wifi_is_connected())
+                    {
                         send_status_update_with_retry(device_status, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
                     }
                 }
 
                 // If we previously failed to send, try to send stored readings first
-                if (context->wifi_send_failed) {
+                if (context->wifi_send_failed)
+                {
                     ESP_LOGI(TAG, "Previous send failed, attempting to send stored readings first");
-                    if (send_stored_readings()) {
+                    if (send_stored_readings())
+                    {
                         ESP_LOGI(TAG, "Successfully sent stored readings");
-                    } else {
+                    }
+                    else
+                    {
                         ESP_LOGW(TAG, "Failed to send stored readings");
                     }
                 }
 
                 // Create a temporary buffer to hold data for sending
-                sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
-                if (temp_buffer == NULL) {
+                sensor_reading_t* temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
+                if (temp_buffer == NULL)
+                {
                     ESP_LOGE(TAG, "Failed to allocate temporary buffer for readings");
                     context->wifi_send_failed = true;
                     last_send_time = time(NULL);
@@ -572,9 +658,12 @@ void task_send_data(void *arg) {
                 int temp_count = 0;
 
                 // Lock the mutex to safely copy and clear the shared buffer
-                if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
-                    if (*(context->reading_idx) > 0) {
-                        memcpy(temp_buffer, context->reading_buffer, *(context->reading_idx) * sizeof(sensor_reading_t));
+                if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE)
+                {
+                    if (*(context->reading_idx) > 0)
+                    {
+                        memcpy(temp_buffer, context->reading_buffer,
+                               *(context->reading_idx) * sizeof(sensor_reading_t));
                         temp_count = *(context->reading_idx);
                         *(context->reading_idx) = 0; // Clear the buffer index
                     }
@@ -582,11 +671,15 @@ void task_send_data(void *arg) {
                 }
 
                 bool send_success = true;
-                if (temp_count > 0) {
+                if (temp_count > 0)
+                {
                     ESP_LOGI(TAG, "Sending %d batched readings.", temp_count);
-                    send_success = send_sensor_data_with_retry(temp_buffer, temp_count, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
-                } else {
-                    ESP_LOGI(TAG, "No new readings to send.");
+                    send_success = send_sensor_data_with_retry(temp_buffer, temp_count, CONFIG_SENSOR_ID,
+                                                               CONFIG_BEARER_TOKEN);
+                }
+                else
+                {
+                    ESP_LOGD(TAG, "No new readings to send.");
                 }
 
                 free(temp_buffer);
@@ -596,41 +689,53 @@ void task_send_data(void *arg) {
 
                 esp_wifi_disconnect();
                 esp_wifi_stop();
-                ESP_LOGI(TAG, "Wi-Fi disconnected to save power.");
-
-            } else {
+                ESP_LOGD(TAG, "Wi-Fi disconnected to save power.");
+            }
+            else
+            {
                 ESP_LOGE(TAG, "Failed to connect to Wi-Fi. Will retry in %d minutes.", DATA_SEND_INTERVAL_MINUTES);
 
                 // Mark send as failed
                 context->wifi_send_failed = true;
 
                 // Save current readings to persistent storage since we can't send them
-                sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
-                if (temp_buffer != NULL) {
+                sensor_reading_t* temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
+                if (temp_buffer != NULL)
+                {
                     int temp_count = 0;
 
                     // Lock the mutex to safely copy the shared buffer
-                    if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
-                        if (*(context->reading_idx) > 0) {
-                            memcpy(temp_buffer, context->reading_buffer, *(context->reading_idx) * sizeof(sensor_reading_t));
+                    if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE)
+                    {
+                        if (*(context->reading_idx) > 0)
+                        {
+                            memcpy(temp_buffer, context->reading_buffer,
+                                   *(context->reading_idx) * sizeof(sensor_reading_t));
                             temp_count = *(context->reading_idx);
                             *(context->reading_idx) = 0; // Clear the buffer index
                         }
                         xSemaphoreGive(context->buffer_mutex);
                     }
 
-                    if (temp_count > 0) {
+                    if (temp_count > 0)
+                    {
                         ESP_LOGI(TAG, "Saving %d readings to persistent storage due to Wi-Fi failure", temp_count);
                         esp_err_t storage_err = persistent_storage_save_readings(temp_buffer, temp_count);
-                        if (storage_err != ESP_OK) {
-                            ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s", esp_err_to_name(storage_err));
-                        } else {
-                            ESP_LOGI(TAG, "Successfully saved readings to persistent storage");
+                        if (storage_err != ESP_OK)
+                        {
+                            ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s",
+                                     esp_err_to_name(storage_err));
+                        }
+                        else
+                        {
+                            ESP_LOGD(TAG, "Successfully saved readings to persistent storage");
                         }
                     }
 
                     free(temp_buffer);
-                } else {
+                }
+                else
+                {
                     ESP_LOGE(TAG, "Failed to allocate memory to save readings to persistent storage");
                 }
             }

@@ -158,7 +158,7 @@ static void parse_wifi_credentials()
     }
 
     char* network_str_saveptr;
-    char* network_str = strtok_r(wifi_credentials_copy, ";", &network_str_saveptr);
+    char* network_str = strtok_r(wifi_credentials_copy, "#", &network_str_saveptr);
     s_num_networks = 0;
     while (network_str != NULL && s_num_networks < MAX_WIFI_NETWORKS)
     {
@@ -172,10 +172,10 @@ static void parse_wifi_credentials()
                     sizeof(s_wifi_networks[s_num_networks].password) - 1);
             s_num_networks++;
         }
-        network_str = strtok_r(NULL, ";", &network_str_saveptr);
+        network_str = strtok_r(NULL, "#", &network_str_saveptr);
     }
     free(wifi_credentials_copy);
-    ESP_LOGI(TAG, "Found %d Wi-Fi networks in credentials.", s_num_networks);
+    ESP_LOGD(TAG, "Found %d Wi-Fi networks in credentials.", s_num_networks);
 }
 
 static void try_to_connect(void)
@@ -218,7 +218,7 @@ void wifi_manager_init(void)
         ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
 
         s_is_initialized = true;
-        ESP_LOGI(TAG, "Wi-Fi system initialized.");
+        ESP_LOGD(TAG, "Wi-Fi system initialized.");
     }
 
     // These functions are safe to call multiple times to start/restart the Wi-Fi connection.

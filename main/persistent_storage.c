@@ -51,7 +51,7 @@ esp_err_t persistent_storage_init(void) {
     }
 
     s_initialized = true;
-    ESP_LOGI(TAG, "Persistent storage initialized");
+    ESP_LOGD(TAG, "Persistent storage initialized");
     return ESP_OK;
 }
 

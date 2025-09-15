@@ -14,6 +14,7 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include "sensor_data.h"
 
 /**
  * @brief Initialize the battery monitoring system
@@ -54,3 +55,11 @@ esp_err_t battery_get_status_string(char *buffer, size_t buffer_size);
  * @return esp_err_t ESP_OK on success, error code on failure
  */
 esp_err_t get_device_status_string(char *buffer, size_t buffer_size);
+
+/**
+ * @brief Get combined device status data for transmission
+ *
+ * @param status Pointer to device_status_t structure to fill
+ * @return esp_err_t ESP_OK on success, error code on failure
+ */
+esp_err_t get_device_status_data(device_status_t *status);
