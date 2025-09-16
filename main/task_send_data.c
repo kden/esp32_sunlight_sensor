@@ -24,6 +24,7 @@
 #include "time_utils.h"
 #include "power_management.h"
 #include "wifi_monitor.h"
+#include "esp_sleep.h"
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
@@ -113,8 +114,10 @@ static void format_time_status_callback(const struct tm* local_time, time_t now,
  *
  * Creates and sends a standardized WiFi connection status message containing
  * the connected SSID and IP address (if available).
+ *
+ * @param is_initial_connection true for initial boot connection, false for periodic reconnections
  */
-static void send_wifi_connection_status(void) {
+static void send_wifi_connection_status(bool is_initial_connection) {
     wifi_config_t wifi_config;
     char ip_address[16];
     char status_msg[128];
@@ -145,7 +148,10 @@ static void send_wifi_connection_status(void) {
         }
     }
 
-    send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+    // Only send status updates for initial connections or wake from sleep
+    if (is_initial_connection || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
+        send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+    }
 }
 
 /**
@@ -270,20 +276,12 @@ static void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
                 }
             }
         } else {
-            // Regular interval sync
+            // Regular interval sync - don't send status messages for these
             bool ntp_success = initialize_sntp();
             if (ntp_success) {
                 with_local_timezone(log_system_time_callback, NULL);
                 *last_ntp_sync_time = time(NULL);
-
-                char ntp_status_msg[128];
-                time_format_data_t data = {
-                    .buffer = ntp_status_msg,
-                    .buffer_size = sizeof(ntp_status_msg),
-                    .prefix = "ntp set"
-                };
-                with_local_timezone(format_time_status_callback, &data);
-                ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
+                ESP_LOGI(TAG, "Regular NTP sync completed successfully");
             } else {
                 ESP_LOGE(TAG, "Regular NTP sync failed");
             }
@@ -549,8 +547,8 @@ void task_send_data(void *arg) {
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
 
-        // Send WiFi connection status
-        send_wifi_connection_status();
+        // Send WiFi connection status (initial connection = true)
+        send_wifi_connection_status(true);
 
         // Send device status
         send_device_status_if_appropriate();
