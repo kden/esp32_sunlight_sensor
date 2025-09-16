@@ -23,7 +23,7 @@
 bool should_enter_deep_sleep(void) {
     // Only ESP32-C3 supports our deep sleep implementation
 #if !CONFIG_IDF_TARGET_ESP32C3
-    ESP_LOGD(TAG, "Deep sleep only supported on ESP32-C3, skipping");
+    ESP_LOGD(TAG, "Deep sleep only supported on ESP32-C3 (current target: %s)", CONFIG_IDF_TARGET);
     return false;
 #endif
 

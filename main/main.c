@@ -140,10 +140,10 @@ void app_main(void)
 
     // Create and launch the tasks with increased stack sizes to prevent stack overflow
     // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);  // Increased from 4096
+    xTaskCreate(task_send_data, "send_data_task", 12288, app_context, 5, NULL);  // Increased for ESP32-S3
     // Give the send_data_task time to connect and perform the initial NTP sync
     vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
+    xTaskCreate(task_get_sensor_data, "sensor_task", 8192, app_context, 5, NULL);  // Increased for ESP32-S3
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
 }

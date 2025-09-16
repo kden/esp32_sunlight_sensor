@@ -21,12 +21,35 @@
 
 #include "battery_monitor.h"
 #include "wifi_monitor.h"
+#include "esp_sleep.h"
 
 #define TAG "HTTP"
 #define MAX_READINGS_PER_CHUNK 50  // Send at most 50 readings per HTTP request
 
 extern const uint8_t _binary_server_cert_pem_start[];
 extern const uint8_t _binary_server_cert_pem_end[];
+
+/**
+ * @brief Add boot/wake reason prefix to status messages
+ */
+static void add_boot_reason_to_status(char* status_msg, size_t buffer_size) {
+    esp_sleep_wakeup_cause_t wakeup_cause = esp_sleep_get_wakeup_cause();
+    char temp_msg[128];
+    strncpy(temp_msg, status_msg, sizeof(temp_msg) - 1);
+    temp_msg[sizeof(temp_msg) - 1] = '\0';
+
+    switch (wakeup_cause) {
+        case ESP_SLEEP_WAKEUP_UNDEFINED:
+            snprintf(status_msg, buffer_size, "[boot] %s", temp_msg);
+            break;
+        case ESP_SLEEP_WAKEUP_TIMER:
+            snprintf(status_msg, buffer_size, "[wake] %s", temp_msg);
+            break;
+        default:
+            // Keep original message for other wake reasons
+            break;
+    }
+}
 
 /**
  * @brief HTTP event handler for logging. It is static as it's only used within this file.
@@ -308,6 +331,12 @@ esp_err_t send_status_update(const char* status_message, const char* sensor_id, 
         return ESP_ERR_INVALID_ARG;
     }
 
+    // Create a copy of the status message with boot reason prefix
+    char enhanced_status[256];
+    strncpy(enhanced_status, status_message, sizeof(enhanced_status) - 1);
+    enhanced_status[sizeof(enhanced_status) - 1] = '\0';
+    add_boot_reason_to_status(enhanced_status, sizeof(enhanced_status));
+
     cJSON *root_array = NULL;
     char *json_payload = NULL;
     esp_err_t result = ESP_FAIL;
@@ -333,7 +362,7 @@ esp_err_t send_status_update(const char* status_message, const char* sensor_id, 
     cJSON_AddStringToObject(status_object, "sensor_id", sensor_id);
     cJSON_AddStringToObject(status_object, "timestamp", timestamp_str);
     cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET);
-    cJSON_AddStringToObject(status_object, "status", status_message);
+    cJSON_AddStringToObject(status_object, "status", enhanced_status);
 
     // Add the Git commit info to the status payload
     cJSON_AddStringToObject(status_object, "commit_sha", GIT_COMMIT_SHA);
@@ -348,7 +377,7 @@ esp_err_t send_status_update(const char* status_message, const char* sensor_id, 
         goto cleanup;
     }
 
-    ESP_LOGI(TAG, "Sending status update: '%s'", status_message);
+    ESP_LOGI(TAG, "Sending status update: '%s'", enhanced_status);
     ESP_LOGD(TAG, "Status JSON Payload: %s", json_payload);
 
     result = _send_json_payload_with_status(json_payload, bearer_token);
@@ -400,10 +429,17 @@ esp_err_t send_battery_status_update(const char* sensor_id, const char* bearer_t
     char timestamp_str[32];
     strftime(timestamp_str, sizeof(timestamp_str), "%Y-%m-%dT%H:%M:%SZ", gmtime(&now));
 
+    // Create base status message and add boot reason
+    char base_status[] = "battery";
+    char enhanced_status[64];
+    strncpy(enhanced_status, base_status, sizeof(enhanced_status) - 1);
+    enhanced_status[sizeof(enhanced_status) - 1] = '\0';
+    add_boot_reason_to_status(enhanced_status, sizeof(enhanced_status));
+
     cJSON_AddStringToObject(status_object, "sensor_id", sensor_id);
     cJSON_AddStringToObject(status_object, "timestamp", timestamp_str);
     cJSON_AddStringToObject(status_object, "sensor_set_id", CONFIG_SENSOR_SET);
-    cJSON_AddStringToObject(status_object, "status", "battery");
+    cJSON_AddStringToObject(status_object, "status", enhanced_status);
 
     // Add numeric battery fields
     cJSON_AddNumberToObject(status_object, "battery_voltage", voltage);

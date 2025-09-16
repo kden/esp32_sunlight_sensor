@@ -39,7 +39,6 @@
 #define HTTP_RETRY_DELAY_MS 5000
 
 // Forward declarations
-static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix);
 static bool send_status_update_with_retry(const char* status_message, const char* sensor_id, const char* bearer_token);
 
 // Global time tracking variables
@@ -253,7 +252,12 @@ static void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
 
                 if (is_initial_boot) {
                     char ntp_status_msg[128];
-                    format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
+                    time_format_data_t data = {
+                        .buffer = ntp_status_msg,
+                        .buffer_size = sizeof(ntp_status_msg),
+                        .prefix = "ntp set"
+                    };
+                    with_local_timezone(format_time_status_callback, &data);
                     send_status_update_with_retry(ntp_status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
                 } else {
                     ESP_LOGI(TAG, "NTP sync successful (status not sent - post-boot sync)");
@@ -273,7 +277,12 @@ static void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
                 *last_ntp_sync_time = time(NULL);
 
                 char ntp_status_msg[128];
-                format_time_status_message(ntp_status_msg, sizeof(ntp_status_msg), "ntp set");
+                time_format_data_t data = {
+                    .buffer = ntp_status_msg,
+                    .buffer_size = sizeof(ntp_status_msg),
+                    .prefix = "ntp set"
+                };
+                with_local_timezone(format_time_status_callback, &data);
                 ESP_LOGI(TAG, "Regular NTP sync completed: %s", ntp_status_msg);
             } else {
                 ESP_LOGE(TAG, "Regular NTP sync failed");
@@ -334,25 +343,6 @@ static sensor_reading_t* create_filtered_readings(const sensor_reading_t* origin
 
     ESP_LOGI(TAG, "Filtered %d/%d readings", *filtered_count, count);
     return filtered;
-}
-
-/**
- * @brief Create a formatted time string with both UTC and local timestamps
- *
- * Generates a status message string suitable for transmission to the remote API,
- * containing both UTC and local time information with the specified prefix.
- *
- * @param buffer Output buffer to store the formatted string
- * @param buffer_size Size of the output buffer
- * @param prefix Text to prepend to the time information (e.g., "ntp set", "boot time")
- */
-static void format_time_status_message(char* buffer, size_t buffer_size, const char* prefix) {
-    time_format_data_t data = {
-        .buffer = buffer,
-        .buffer_size = buffer_size,
-        .prefix = prefix
-    };
-    with_local_timezone(format_time_status_callback, &data);
 }
 
 /**

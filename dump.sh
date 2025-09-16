@@ -4,7 +4,9 @@
 # and all .c files in the main/ directory, with a formatted header
 # showing the filename above the content of each file.
 
-for file in  include/*.h main/*.c platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py components/esp_idf_lib_helpers/* components/i2cdev/*; do
+# for file in  CMakeLists.txt include/*.h main/*.c main/CMakeLists.txt platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py components/*/*; do
+
+for file in  CMakeLists.txt include/*.h main/*.c main/CMakeLists.txt platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py; do
   if [ -f "$file" ]; then
     echo "----------"
     echo "$file"

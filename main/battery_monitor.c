@@ -25,26 +25,89 @@ static adc_oneshot_unit_handle_t adc1_handle = NULL;
 static adc_cali_handle_t adc1_cali_handle = NULL;
 static bool adc_calibrated = false;
 static adc_channel_t battery_adc_channel;
+static bool battery_circuit_present = false;
 
 /**
- * @brief Map GPIO number to ADC channel for ESP32-C3
+ * @brief Map GPIO number to ADC channel for different ESP32 variants
+ * @param gpio_num GPIO pin number
+ * @param channel Output parameter for ADC channel
+ * @return ESP_OK on success, error code on failure
  */
 static esp_err_t gpio_to_adc_channel(int gpio_num, adc_channel_t *channel) {
+    if (channel == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+#if CONFIG_IDF_TARGET_ESP32C3
     if (gpio_num < 0 || gpio_num > 5) {
-        ESP_LOGE(TAG, "GPIO %d is not a valid ADC pin for ESP32-C3", gpio_num);
+        ESP_LOGE(TAG, "GPIO %d is not a valid ADC pin for ESP32-C3 (valid: 0-5)", gpio_num);
         return ESP_ERR_INVALID_ARG;
     }
     *channel = (adc_channel_t)gpio_num;  // Direct mapping for ESP32-C3
+#elif CONFIG_IDF_TARGET_ESP32S3
+    if (gpio_num < 1 || gpio_num > 10) {
+        ESP_LOGE(TAG, "GPIO %d is not a valid ADC1 pin for ESP32-S3 (valid: 1-10)", gpio_num);
+        return ESP_ERR_INVALID_ARG;
+    }
+    *channel = (adc_channel_t)(gpio_num - 1);  // GPIO 1-10 map to ADC1 channels 0-9
+#else
+    ESP_LOGE(TAG, "Unsupported target for battery monitoring");
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
+
     return ESP_OK;
+}
+
+/**
+ * @brief Calculate battery percentage from voltage
+ * @param voltage Battery voltage
+ * @return Battery percentage (0-100)
+ */
+static int calculate_battery_percentage(float voltage) {
+    if (voltage >= 4.0) {
+        return 100;
+    } else if (voltage >= 3.7) {
+        return (int)(50.0 + (voltage - 3.7) * (50.0 / 0.3));
+    } else if (voltage >= 3.3) {
+        return (int)((voltage - 3.3) * (50.0 / 0.4));
+    } else {
+        return 0;
+    }
+}
+
+/**
+ * @brief Get battery status description from voltage
+ * @param voltage Battery voltage
+ * @return Status string ("ok", "low", "critical")
+ */
+static const char* get_battery_status(float voltage) {
+    if (voltage <= BATTERY_CRITICAL_THRESHOLD_V) {
+        return "critical";
+    } else if (voltage <= BATTERY_LOW_THRESHOLD_V) {
+        return "low";
+    } else {
+        return "ok";
+    }
 }
 
 esp_err_t battery_monitor_init(void) {
     esp_err_t ret = ESP_OK;
 
+    // Check if battery monitoring is disabled in configuration
+    if (!CONFIG_HAS_BATTERY_CIRCUIT) {
+        ESP_LOGI(TAG, "Battery monitoring disabled in configuration (no battery circuit)");
+        battery_circuit_present = false;
+        return ESP_OK;
+    }
+
+    // Battery circuit is present according to configuration
+    battery_circuit_present = true;
+
     // Map the configured GPIO to ADC channel
     ret = gpio_to_adc_channel(CONFIG_BATTERY_ADC_GPIO, &battery_adc_channel);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Invalid battery ADC GPIO: %d", CONFIG_BATTERY_ADC_GPIO);
+        battery_circuit_present = false;
         return ret;
     }
 
@@ -58,6 +121,7 @@ esp_err_t battery_monitor_init(void) {
     ret = adc_oneshot_new_unit(&init_config1, &adc1_handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize ADC1 unit: %s", esp_err_to_name(ret));
+        battery_circuit_present = false;
         return ret;
     }
 
@@ -69,6 +133,7 @@ esp_err_t battery_monitor_init(void) {
     ret = adc_oneshot_config_channel(adc1_handle, battery_adc_channel, &config);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to configure ADC channel: %s", esp_err_to_name(ret));
+        battery_circuit_present = false;
         return ret;
     }
 
@@ -88,11 +153,15 @@ esp_err_t battery_monitor_init(void) {
         adc_calibrated = false;
     }
 
-    ESP_LOGI(TAG, "Battery monitoring initialized");
+    ESP_LOGI(TAG, "Battery monitoring initialized successfully");
     return ESP_OK;
 }
 
 bool battery_is_present(void) {
+    if (!battery_circuit_present) {
+        return false;
+    }
+
     float voltage;
     esp_err_t ret = battery_get_voltage(&voltage);
     if (ret != ESP_OK) {
@@ -133,7 +202,7 @@ esp_err_t battery_get_voltage(float *voltage) {
 
     int avg_raw = total_raw / num_samples;
 
-    ESP_LOGI(TAG, "ADC readings - avg: %d, min: %d, max: %d, range: %d",
+    ESP_LOGD(TAG, "ADC readings - avg: %d, min: %d, max: %d, range: %d",
              avg_raw, min_raw, max_raw, max_raw - min_raw);
 
     if (adc_calibrated) {
@@ -148,23 +217,27 @@ esp_err_t battery_get_voltage(float *voltage) {
         float adc_voltage = voltage_mv / 1000.0;
         *voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
 
-        ESP_LOGI(TAG, "ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
+        ESP_LOGD(TAG, "ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
     } else {
         // Fallback: use raw reading with approximate conversion
-        // For ESP32-C3 with 12-bit ADC and 3.3V reference
+        // For both ESP32-C3 and ESP32-S3 with 12-bit ADC and 3.3V reference
         float adc_voltage = (avg_raw / 4095.0) * 3.3;
         *voltage = adc_voltage * BATTERY_VOLTAGE_DIVIDER_RATIO;
 
-        ESP_LOGI(TAG, "Raw ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
+        ESP_LOGD(TAG, "Raw ADC voltage: %.3fV, calculated battery voltage: %.3fV", adc_voltage, *voltage);
     }
 
-    ESP_LOGI(TAG, "Final battery voltage: %.3fV (threshold: %.1fV)", *voltage, BATTERY_PRESENT_THRESHOLD_V);
     return ESP_OK;
 }
 
 esp_err_t battery_get_status_string(char *buffer, size_t buffer_size) {
     if (buffer == NULL || buffer_size == 0) {
         return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!battery_circuit_present) {
+        snprintf(buffer, buffer_size, "no battery circuit");
+        return ESP_OK;
     }
 
     if (!battery_is_present()) {
@@ -179,28 +252,10 @@ esp_err_t battery_get_status_string(char *buffer, size_t buffer_size) {
         return ret;
     }
 
-    // Estimate percentage (rough approximation for Li-ion)
-    float percentage = 0.0;
-    if (voltage >= 4.0) {
-        percentage = 100.0;
-    } else if (voltage >= 3.7) {
-        percentage = 50.0 + (voltage - 3.7) * (50.0 / 0.3);
-    } else if (voltage >= 3.3) {
-        percentage = (voltage - 3.3) * (50.0 / 0.4);
-    } else {
-        percentage = 0.0;
-    }
+    int percentage = calculate_battery_percentage(voltage);
+    const char* status = get_battery_status(voltage);
 
-    const char* status;
-    if (voltage <= BATTERY_CRITICAL_THRESHOLD_V) {
-        status = "critical";
-    } else if (voltage <= BATTERY_LOW_THRESHOLD_V) {
-        status = "low";
-    } else {
-        status = "ok";
-    }
-
-    snprintf(buffer, buffer_size, "battery %.2fV %.0f%% %s", voltage, percentage, status);
+    snprintf(buffer, buffer_size, "battery %.2fV %d%% %s", voltage, percentage, status);
     return ESP_OK;
 }
 
@@ -237,7 +292,7 @@ esp_err_t battery_get_api_data(float *voltage, int *percentage) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!battery_is_present()) {
+    if (!battery_circuit_present || !battery_is_present()) {
         return ESP_ERR_NOT_FOUND;
     }
 
@@ -246,16 +301,6 @@ esp_err_t battery_get_api_data(float *voltage, int *percentage) {
         return ret;
     }
 
-    // Calculate percentage (same logic as battery_get_status_string)
-    if (*voltage >= 4.0) {
-        *percentage = 100;
-    } else if (*voltage >= 3.7) {
-        *percentage = (int)(50.0 + (*voltage - 3.7) * (50.0 / 0.3));
-    } else if (*voltage >= 3.3) {
-        *percentage = (int)((*voltage - 3.3) * (50.0 / 0.4));
-    } else {
-        *percentage = 0;
-    }
-
+    *percentage = calculate_battery_percentage(*voltage);
     return ESP_OK;
 }
