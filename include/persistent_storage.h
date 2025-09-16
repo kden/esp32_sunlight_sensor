@@ -14,6 +14,7 @@
 
 #include "sensor_data.h"
 #include "esp_err.h"
+#include <stdbool.h>
 
 // 4 hours of readings at 15-second intervals = 4 * 60 * 60 / 15 = 960 readings
 #define PERSISTENT_STORAGE_MAX_READINGS 960
@@ -58,3 +59,20 @@ esp_err_t persistent_storage_clear_readings(void);
  * @return esp_err_t ESP_OK on success
  */
 esp_err_t persistent_storage_get_count(int* count);
+
+/**
+ * @brief Initialize persistent storage with logging and error handling
+ *
+ * @return true if initialization was successful, false otherwise
+ */
+bool persistent_storage_initialize_and_log(void);
+
+/**
+ * @brief Send all stored readings and clear storage on success
+ *
+ * This function loads all stored readings, sends them using the data processor,
+ * and clears the storage if transmission is successful.
+ *
+ * @return true if successful or no readings to send, false on error
+ */
+bool persistent_storage_send_all_stored(void);
