@@ -76,6 +76,12 @@ One way to create the PEM file is to run the following command:
 openssl s_client -showcerts -connect  api.example.com:443 </dev/null | openssl x509 -outform PEM > server_cert.pem
 ```
 
+Copy the appropriate `sdkconfig.defaults_*` file to `sdkconfig.defaults`.  This is how we add options to the `sdkconfig.defaults` file that is picked up by the pio run command.  For the C3 board it has some different options, in particular changing the partition allocation to make room for our verbose logging.
+
+```shell
+cp sdkconfig.defaults_esp32c3_base sdkconfig.defaults
+```
+
 Once you have PlatformIO installed, you can build the project and upload it to your ESP32
 board by running the following commands from the root directory:
 
@@ -99,66 +105,58 @@ pio device monitor
 You should see the wifi waking up every 5 minutes or so to send a number of readings that were collected every 15 seconds.
 
 ```
-E (310150) WIFI_MANAGER: Wi-Fi disconnected, reason: 8 (wifi_reason_assoc_leave)
-I (310160) WIFI_MANAGER: Retrying connection to 'MyWifiSSID' (attempt 1/3)...
-I (310200) wifi:flush txq
-I (310200) wifi:stop sw txq
-I (310200) wifi:lmac stop hw txq
-I (310200) SEND_DATA_TASK: Wi-Fi disconnected to save power.
-I (314050) LIGHT_SENSOR: ambient light:     163.33 lux
-I (314050) SENSOR_TASK: Reading #1 saved (Lux: 163.33)
+I (19239) SEND_DATA_TASK: No stored readings to send
+I (19249) SEND_DATA_TASK: Successfully processed stored readings
+I (25489) SENSOR_TASK: Reading #1 saved (Lux: 4.00)
 
  ... 
 
-I (602470) LIGHT_SENSOR: ambient light:     163.33 lux
-I (602470) SENSOR_TASK: Reading #20 saved (Lux: 163.33)
-I (610200) SEND_DATA_TASK: Data send interval reached. Connecting to Wi-Fi...
-I (610200) wifi:mode : sta (7c:df:a1:e2:dc:6c)
-I (610200) wifi:enable tsf
-I (610200) wifi:Set ps type: 0, coexist: 0
+I (310489) SENSOR_TASK: Reading #20 saved (Lux: 8.00)
+I (319249) TIME_UTILS: Local time: 2025-09-15 16:48:03 (22:00-04:00) - DAY (active)
+I (319249) SEND_DATA_TASK: Data send interval reached. Connecting to Wi-Fi...
+I (319249) wifi:Set ps type: 0, coexist: 0
 
-I (610200) WIFI_MANAGER: Attempting to connect to network: MyWifiSSID
-I (610220) wifi:new:<4,0>, old:<1,0>, ap:<255,255>, sta:<4,0>, prof:1, snd_ch_cfg:0x0
-I (610220) wifi:state: init -> auth (0xb0)
-I (610230) wifi:state: auth -> assoc (0x0)
-I (610250) wifi:state: assoc -> run (0x10)
-I (610270) wifi:connected with MyWifiSSID, aid = 14, channel 4, BW20, bssid = b2:c0:3a:b3:a6:35
-I (610270) wifi:security: WPA2-PSK, phy: bgn, rssi: -53
-I (610270) wifi:pm start, type: 0
-
-I (610280) wifi:dp: 1, bi: 102400, li: 3, scale listen interval from 307200 us to 307200 us
-I (610280) wifi:set rx beacon pti, rx_bcn_pti: 0, bcn_timeout: 25000, mt_pti: 0, mt_time: 10000
-I (610340) wifi:dp: 2, bi: 102400, li: 4, scale listen interval from 307200 us to 409600 us
-I (610340) wifi:AP's beacon interval = 102400 us, DTIM period = 2
-I (610350) wifi:<ba-add>idx:0 (ifx:0, b2:c0:3a:b3:a6:35), tid:0, ssn:0, winSize:64
-I (611370) esp_netif_handlers: sta ip: 10.9.132.38, mask: 255.255.255.0, gw: 10.9.132.36
-I (611370) WIFI_MANAGER: Successfully connected to 'MyWifiSSID' with IP: 10.9.132.38
-I (612200) SEND_DATA_TASK: Sending 20 batched readings.
-I (612200) HTTP: Sending JSON with 20 records.
-I (613520) HTTP: HTTPS POST request sent successfully, status = 200
-I (613530) wifi:state: run -> init (0x0)
-I (613540) wifi:pm stop, total sleep time: 0 us / 3260734 us
+I (319249) SEND_DATA_TASK: Sending 20 batched readings.
+I (319259) SEND_DATA_TASK: Filtered 20/20 readings
+I (319259) SEND_DATA_TASK: Sensor data send attempt 1/3 (20 filtered readings)
+I (319269) HTTP: Sending 20 readings in chunks of 50
+I (319269) HTTP: Sending chunk 1-20 of 20 total readings
+I (319279) HTTP: Sending JSON chunk with 20 records.
+I (320089) HTTP: HTTPS POST request completed, status = 200, content_length = 57
+I (320089) HTTP: HTTP request successful with status 200
+I (320099) HTTP: Successfully sent chunk. Progress: 20/20 readings
+I (320099) HTTP: Successfully sent all 20 readings in 1 chunks
+I (320099) SEND_DATA_TASK: Sensor data sent successfully on attempt 1
+I (320109) wifi:state: run -> init (0x0)
+I (320119) wifi:pm stop, total sleep time: 0 us / 308578140 us
 ```
 
 When the ESP32-IDF first boots up and connects to the internet, it will attempt to send two status messages to 
 the sensor API, formatted as a list of a single JSON object.  This is so you don't have to wait for five minutes to look at your API logs and see if messages are coming in.
 
 ```json
-[{"sensor_id": "sensor_1", "timestamp": "2025-07-18T19:26:23Z", "sensor_set_id": "test", "status": "wifi connected"}]
+[{"sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:06:37Z", "sensor_set_id": "temp", "status": "[boot] wifi connected to Wifi42 IP 10.0.4.71 -47dBm", "commit_sha": "7094935", "commit_timestamp": "2025-09-13 23:07:38 -0500"}]
 ```
 
 ```json
-[{"sensor_id": "sensor_1", "timestamp": "2025-07-18T19:26:18Z", "sensor_set_id": "test", "status": "ntp set"}]
+[{"sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:06:43Z", "sensor_set_id": "temp", "status": "[boot] ntp set 2025-09-15 21:06:43 (UTC) / 16:06:43 (local) [valid: yes]", "commit_sha": "7094935", "commit_timestamp": "2025-09-13 23:07:38 -0500"}]
 ```
 
 Then it will send 5-minute buffers of messages as JSON lists of objects.
 
 ```json
-[{"light_intensity": 177.5, "sensor_id": "sensor_1", "timestamp": "2025-07-18T19:16:08Z", "sensor_set_id": "test"}, 
-  {"light_intensity": 176.6666717529297, "sensor_id": "sensor_1", "timestamp": "2025-07-18T19:16:23Z", "sensor_set_id": "test"}, 
-  {"light_intensity": 175.8333282470703, "sensor_id": "sensor_1", "timestamp": "2025-07-18T19:16:38Z", "sensor_set_id": "test"}, 
-  {"light_intensity": 173.3333282470703, "sensor_id": "sensor_1", "timestamp": "2025-07-18T19:16:54Z", "sensor_set_id": "test"}, 
-  {"light_intensity": 170.8333282470703, "sensor_id": "sensor_1", "timestamp": "2025-07-18T19:17:09Z", "sensor_set_id": "test"}]
+[
+  {"light_intensity": 32, "sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:57:42Z", "sensor_set_id": "temp"}, 
+  {"light_intensity": 32, "sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:57:57Z", "sensor_set_id": "temp"}, 
+  {"light_intensity": 31, "sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:58:12Z", "sensor_set_id": "temp"}, 
+  {"light_intensity": 14, "sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:58:27Z", "sensor_set_id": "temp"}, 
+  {"light_intensity": 15, "sensor_id": "sensor_temp", "timestamp": "2025-09-15T21:58:42Z", "sensor_set_id": "temp"}]
+```
+
+At the 5-minute interval, if the board is wired to a battery instead of a USB battery pack, it will also send the battery level as a separate message.
+
+```json
+[{"sensor_id": "sensor_temp", "timestamp": "2025-09-15T22:07:40Z", "sensor_set_id": "temp", "status": "[boot] battery", "battery_voltage": 4.01800012588501, "battery_percent": 100, "wifi_dbm": -47, "commit_sha": "7094935", "commit_timestamp": "2025-09-13 23:07:38 -0500"}]
 ```
 
 ## Options
@@ -168,14 +166,19 @@ There are a few settings that you can change in the credentials.ini file:
 In the `[all_sensors]` section:
 
 - `url`: the URL of the web service where your sensor sends data
-- `sensor_set_id`: each location, for example each area of land which will be blanketed with sensors, gets its own sensor_set_id.  I've only tested this with simple IDs with no spaces.
 
 Under each sensor configuration:
 
 - `sensor_id`: a simple identifier for each sensor
+- `sensor_set_id`: each location, for example each area of land which will be blanketed with sensors, gets its own sensor_set_id.  I've only tested this with simple IDs with no spaces.
 - `wifi_credentials`: one or more SSIDs and passwords separated by a colon.  Each pair can be separated by a semicolon, like `SSID:Password;SSID2:Password2`
-- `sda_gpio`: Pin number used for SDA GPIO (8 for the ESP32-S3-DevKitC-1U-N8)
-- `scl_gpio`: Pin number used for SCL GPIO (9 for the ESP32-S3-DevKitC-1U-N8) 
+- `sda_gpio`: pin number used for SDA GPIO (8 for the ESP32-S3-DevKitC-1U-N8)
+- `scl_gpio`: pin number used for SCL GPIO (9 for the ESP32-S3-DevKitC-1U-N8) 
+- `bearer_token`: simple hard-coded bearer token to authenticate to the sensor API
+- `board_type`: a free-format string describing the board
+- `night_start_hour`: start of nighttime, a period where we won't take sensor readings or connect to Wifi, to save battery power, in local (sensor-set) time.  Defaults to 22.
+- `night_end_hour`: end of nighttime, defaults to 4 (local sensor set time.)
+- `battery_adc_gpio`: pin number used to read voltage.  Defaults to -1 which means unused.  Can't be used with the USB battery pack, only with a battery and voltage divider circuit.
 
 ## Acknowledgments
 
