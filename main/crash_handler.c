@@ -16,8 +16,8 @@
 #include "app_config.h"
 #include "esp_log.h"
 #include "esp_system.h"
-#include "http.h"
-#include "wifi.h"
+#include "api_client.h"
+#include "wifi_manager.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -74,7 +74,7 @@ void check_and_report_crash(void)
 
         // Attempt to connect to Wi-Fi to send the report.
         // This block is self-contained and manages its own connection lifecycle.
-        wifi_manager_init();
+        wifi_manager_init();  // Changed from wifi_manager_init()
         int retries = 15;
         while (!wifi_is_connected() && retries-- > 0)
         {
@@ -84,7 +84,7 @@ void check_and_report_crash(void)
         if (wifi_is_connected())
         {
             ESP_LOGI(TAG, "Wi-Fi connected. Sending crash report...");
-            send_status_update(status_message, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            api_send_status_update(status_message);  // Changed from send_status_update()
             ESP_LOGI(TAG, "Crash report sent successfully.");
 
             // Disconnect Wi-Fi to allow the main application logic to manage power.

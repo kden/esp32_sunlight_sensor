@@ -1,7 +1,7 @@
 /**
 * @file data_processor.h
  *
- * Sensor data processing and transmission functions.
+ * Sensor data processing, storage management, and transmission functions.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
@@ -15,6 +15,13 @@
 #include "app_context.h"
 #include "sensor_data.h"
 #include <stdbool.h>
+
+/**
+ * @brief Initialize data processing and storage systems
+ *
+ * @return true if initialization was successful, false otherwise
+ */
+bool data_processor_init(void);
 
 /**
  * @brief Process buffered sensor readings with automatic buffer management
@@ -42,3 +49,10 @@ bool send_readings_processor(sensor_reading_t* readings, int count);
  * @return true if successful, false otherwise
  */
 bool save_readings_processor(sensor_reading_t* readings, int count);
+
+/**
+ * @brief Send all stored readings and clear storage on success
+ *
+ * @return true if successful or no readings to send, false on error
+ */
+bool send_all_stored_readings(void);

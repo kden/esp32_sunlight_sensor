@@ -21,7 +21,6 @@
 #include "app_config.h"
 #include "sdkconfig.h"
 #include "nvs_flash.h"
-#include "http.h"
 #include "task_send_data.h"
 #include "task_get_sensor_data.h"
 #include "git_version.h" // For build version info
@@ -30,10 +29,10 @@
 #include "sensor_data.h"
 #include "app_context.h"
 #include "crash_handler.h"
-#include "persistent_storage.h"
-#include "battery_monitor.h"
+#include "adc_battery.h"
 #include "time_utils.h"
 #include "power_management.h"
+#include "status_reporter.h"
 
 #define TAG "MAIN"
 
@@ -71,7 +70,7 @@ void app_main(void)
     ESP_ERROR_CHECK(init_light_sensor(&app_context->light_sensor_dev));
 
     // Initialize battery monitoring (safe to call on both ESP32-C3 and ESP32-S3)
-    esp_err_t battery_err = battery_monitor_init();
+    esp_err_t battery_err = adc_battery_init();  // Changed from battery_monitor_init()
     if (battery_err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to initialize battery monitor: %s", esp_err_to_name(battery_err));
         ESP_LOGW(TAG, "Continuing without battery monitoring (this is normal for USB-powered devices)");
@@ -80,7 +79,7 @@ void app_main(void)
 
         // Log initial battery status
         char battery_status[128];
-        if (battery_get_status_string(battery_status, sizeof(battery_status)) == ESP_OK) {
+        if (get_battery_status_string(battery_status, sizeof(battery_status))) {  // Changed function call
             ESP_LOGI(TAG, "Initial %s", battery_status);
         }
     }
@@ -92,22 +91,6 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
-
-    // Initialize persistent storage for sensor readings
-    err = persistent_storage_init();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
-        ESP_LOGW(TAG, "Continuing without persistent storage (readings will be lost on Wi-Fi failure)");
-    } else {
-        ESP_LOGI(TAG, "Persistent storage initialized successfully");
-
-        // Log how many readings are already stored
-        int stored_count = 0;
-        err = persistent_storage_get_count(&stored_count);
-        if (err == ESP_OK && stored_count > 0) {
-            ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
-        }
-    }
 
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();
@@ -140,10 +123,10 @@ void app_main(void)
 
     // Create and launch the tasks with increased stack sizes to prevent stack overflow
     // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 12288, app_context, 5, NULL);  // Increased for ESP32-S3
+    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);  // Increased from 4096
     // Give the send_data_task time to connect and perform the initial NTP sync
     vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 8192, app_context, 5, NULL);  // Increased for ESP32-S3
+    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
 }

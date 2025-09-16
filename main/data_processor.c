@@ -1,7 +1,7 @@
 /**
 * @file data_processor.c
  *
- * Sensor data processing and transmission functions.
+ * Sensor data processing, storage management, and transmission functions.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
@@ -12,7 +12,7 @@
 
 #include "data_processor.h"
 #include "app_config.h"
-#include "http.h"
+#include "api_client.h"
 #include "persistent_storage.h"
 #include "esp_log.h"
 #include <stdlib.h>
@@ -77,6 +77,24 @@ static sensor_reading_t* create_filtered_readings(const sensor_reading_t* origin
     return filtered;
 }
 
+bool data_processor_init(void) {
+    esp_err_t err = persistent_storage_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize persistent storage: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Data processor initialized successfully");
+
+    int stored_count = 0;
+    err = persistent_storage_get_count(&stored_count);
+    if (err == ESP_OK && stored_count > 0) {
+        ESP_LOGI(TAG, "Found %d stored readings from previous session", stored_count);
+    }
+
+    return true;
+}
+
 bool process_buffered_readings(app_context_t *context, bool (*processor)(sensor_reading_t*, int)) {
     sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
     if (temp_buffer == NULL) {
@@ -123,8 +141,7 @@ bool send_readings_processor(sensor_reading_t* readings, int count) {
         ESP_LOGI(TAG, "Sensor data send attempt %d/%d (%d filtered readings)",
                  attempt, MAX_HTTP_RETRY_ATTEMPTS, filtered_count);
 
-        esp_err_t result = send_sensor_data_with_status(filtered_readings, filtered_count,
-                                                       CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        esp_err_t result = api_send_sensor_data(filtered_readings, filtered_count);
 
         if (result == ESP_OK) {
             ESP_LOGI(TAG, "Sensor data sent successfully on attempt %d", attempt);
@@ -164,4 +181,62 @@ bool save_readings_processor(sensor_reading_t* readings, int count) {
         ESP_LOGI(TAG, "Successfully saved readings to persistent storage");
         return true;
     }
+}
+
+bool send_all_stored_readings(void) {
+    // Check if we have any stored readings first
+    int stored_count = 0;
+    esp_err_t err = persistent_storage_get_count(&stored_count);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get stored reading count: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    if (stored_count == 0) {
+        ESP_LOGI(TAG, "No stored readings to send");
+        return true;
+    }
+
+    // Allocate memory for stored readings
+    sensor_reading_t *stored_readings = malloc(PERSISTENT_STORAGE_MAX_READINGS * sizeof(sensor_reading_t));
+    if (stored_readings == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for stored readings");
+        return false;
+    }
+
+    // Load stored readings
+    int loaded_count = 0;
+    err = persistent_storage_load_readings(stored_readings, PERSISTENT_STORAGE_MAX_READINGS, &loaded_count);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load stored readings: %s", esp_err_to_name(err));
+        free(stored_readings);
+        return false;
+    }
+
+    if (loaded_count == 0) {
+        ESP_LOGI(TAG, "No stored readings loaded");
+        free(stored_readings);
+        return true;
+    }
+
+    ESP_LOGI(TAG, "Attempting to send %d stored readings", loaded_count);
+
+    // Send the stored readings
+    bool send_success = send_readings_processor(stored_readings, loaded_count);
+
+    if (send_success) {
+        // Clear stored readings after successful send
+        err = persistent_storage_clear_readings();
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to clear stored readings after send: %s", esp_err_to_name(err));
+            free(stored_readings);
+            return false;
+        }
+        ESP_LOGI(TAG, "Successfully sent and cleared %d stored readings", loaded_count);
+    } else {
+        ESP_LOGE(TAG, "Failed to send stored readings");
+    }
+
+    free(stored_readings);
+    return send_success;
 }

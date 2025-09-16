@@ -15,7 +15,6 @@
 #include "app_context.h"
 #include "network_manager.h"
 #include "data_processor.h"
-#include "persistent_storage.h"
 #include "status_reporter.h"
 #include "time_utils.h"
 #include "power_management.h"
@@ -33,9 +32,9 @@ void task_send_data(void *arg) {
 
     ESP_LOGI(TAG, "Data sending task started. Performing initial setup...");
 
-    // Initialize persistent storage
-    bool persistent_storage_available = persistent_storage_initialize_and_log();
-    if (!persistent_storage_available) {
+    // Initialize data processing and storage systems
+    bool data_processor_available = data_processor_init();
+    if (!data_processor_available) {
         ESP_LOGW(TAG, "Continuing without persistent storage (degraded mode)");
     }
 
@@ -55,7 +54,7 @@ void task_send_data(void *arg) {
         handle_ntp_sync(&last_ntp_sync_time, true);
 
         // Send any stored readings from previous sessions
-        if (persistent_storage_send_all_stored()) {
+        if (send_all_stored_readings()) {
             ESP_LOGI(TAG, "Successfully processed stored readings");
         } else {
             ESP_LOGW(TAG, "Failed to process stored readings, will retry later");
@@ -102,7 +101,7 @@ void task_send_data(void *arg) {
                 // Send any stored readings first if previous send failed
                 if (context->wifi_send_failed) {
                     ESP_LOGI(TAG, "Previous send failed, attempting to send stored readings first");
-                    if (persistent_storage_send_all_stored()) {
+                    if (send_all_stored_readings()) {
                         ESP_LOGI(TAG, "Successfully sent stored readings");
                     } else {
                         ESP_LOGW(TAG, "Failed to send stored readings");

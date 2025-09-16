@@ -13,7 +13,7 @@
 #include "power_management.h"
 #include "time_utils.h"
 #include "app_config.h"
-#include "battery_monitor.h"
+#include "adc_battery.h"  // Changed from "battery_monitor.h"
 #include "esp_sleep.h"
 #include "esp_log.h"
 #include "driver/rtc_io.h"
@@ -23,12 +23,12 @@
 bool should_enter_deep_sleep(void) {
     // Only ESP32-C3 supports our deep sleep implementation
 #if !CONFIG_IDF_TARGET_ESP32C3
-    ESP_LOGD(TAG, "Deep sleep only supported on ESP32-C3 (current target: %s)", CONFIG_IDF_TARGET);
+    ESP_LOGD(TAG, "Deep sleep only supported on ESP32-C3, skipping");
     return false;
 #endif
 
     // Don't sleep if no battery is detected (USB-powered)
-    if (!battery_is_present()) {
+    if (!adc_battery_is_present()) {  // Changed from battery_is_present()
         ESP_LOGI(TAG, "No battery detected (USB power) - skipping deep sleep");
         return false;
     }

@@ -12,10 +12,9 @@
 
 #include "network_manager.h"
 #include "app_config.h"
-#include "wifi.h"
+#include "wifi_manager.h"
 #include "esp_wifi.h"
 #include "ntp.h"
-#include "wifi_monitor.h"
 #include "time_utils.h"
 #include "status_reporter.h"
 #include "esp_sleep.h"
@@ -111,7 +110,7 @@ void send_wifi_connection_status(bool is_initial_connection) {
 
     // Only send status updates for initial connections or wake from sleep
     if (is_initial_connection || esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) {
-        send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+        send_status_update_with_retry(status_msg);
     }
 }
 
@@ -150,7 +149,7 @@ void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
                         .prefix = "ntp set"
                     };
                     with_local_timezone(format_time_status_callback, &data);
-                    send_status_update_with_retry(ntp_status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                    send_status_update_with_retry(ntp_status_msg);
                 } else {
                     ESP_LOGI(TAG, "NTP sync successful (status not sent - post-boot sync)");
                 }
@@ -158,7 +157,7 @@ void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
             } else {
                 ESP_LOGE(TAG, "NTP sync failed despite internet connection");
                 if (is_initial_boot) {
-                    send_status_update_with_retry("ntp sync failed despite connection", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+                    send_status_update_with_retry("ntp sync failed despite connection");
                 }
             }
         } else {
