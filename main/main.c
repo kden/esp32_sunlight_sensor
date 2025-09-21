@@ -30,6 +30,7 @@
 #include "app_context.h"
 #include "crash_handler.h"
 #include "adc_battery.h"
+#include "log_capture.h"
 #include "time_utils.h"
 #include "power_management.h"
 #include "status_reporter.h"
@@ -47,6 +48,21 @@ static int g_reading_idx = 0;
 
 void app_main(void)
 {
+    // Initialize NVS first
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    // Initialize log capture EARLY - before other logging happens
+    log_capture_init();
+
+    // Filter out noisy WiFi system logs - ADD THESE LINES
+    esp_log_level_set("wifi", ESP_LOG_WARN);
+    esp_log_level_set("wifi_init", ESP_LOG_WARN);
+
     // Check wakeup reason first
     esp_sleep_wakeup_cause_t wakeup_reason = check_wakeup_reason();
 
@@ -83,14 +99,6 @@ void app_main(void)
             ESP_LOGI(TAG, "Initial %s", battery_status);
         }
     }
-
-    // Initialize non-volatile storage.
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
 
     // Check if the last reset was due to a crash and report it.
     check_and_report_crash();

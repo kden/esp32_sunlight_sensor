@@ -62,7 +62,9 @@ static esp_err_t send_sensor_data_chunk(const sensor_reading_t* readings, int co
         if (cJSON_AddNumberToObject(sensor_object, "light_intensity", readings[i].lux) == NULL ||
             cJSON_AddStringToObject(sensor_object, "sensor_id", CONFIG_SENSOR_ID) == NULL ||
             cJSON_AddStringToObject(sensor_object, "timestamp", timestamp_str) == NULL ||
-            cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET) == NULL) {
+            cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET) == NULL ||
+            cJSON_AddNumberToObject(sensor_object, "chip_temp_c", readings[i].chip_temp_c) == NULL ||
+            cJSON_AddNumberToObject(sensor_object, "chip_temp_f", readings[i].chip_temp_f) == NULL) {
             ESP_LOGE(TAG, "Failed to add fields to sensor object for reading #%d", i);
             cJSON_Delete(sensor_object);
             break;
@@ -158,6 +160,12 @@ esp_err_t api_send_status_update(const char* status_message) {
         return ESP_ERR_INVALID_ARG;
     }
 
+    ESP_LOGI(TAG, "Input status message length: %zu bytes", strlen(status_message));
+
+    // Check available heap before JSON operations
+    size_t heap_before = esp_get_free_heap_size();
+    ESP_LOGI(TAG, "Heap before JSON creation: %zu bytes", heap_before);
+
     // Create enhanced status message with boot reason prefix
     char enhanced_status[256];
     create_enhanced_status_message(status_message, enhanced_status, sizeof(enhanced_status));
@@ -168,13 +176,13 @@ esp_err_t api_send_status_update(const char* status_message) {
 
     root_array = cJSON_CreateArray();
     if (root_array == NULL) {
-        ESP_LOGE(TAG, "Failed to create JSON array for status update");
+        ESP_LOGE(TAG, "Failed to create JSON array - heap: %zu", esp_get_free_heap_size());
         return ESP_ERR_NO_MEM;
     }
 
     cJSON *status_object = cJSON_CreateObject();
     if (status_object == NULL) {
-        ESP_LOGE(TAG, "Failed to create status object");
+        ESP_LOGE(TAG, "Failed to create status object - heap: %zu", esp_get_free_heap_size());
         result = ESP_ERR_NO_MEM;
         goto cleanup;
     }
@@ -195,11 +203,36 @@ esp_err_t api_send_status_update(const char* status_message) {
 
     cJSON_AddItemToArray(root_array, status_object);
 
-    json_payload = cJSON_Print(root_array);
-    if (json_payload == NULL) {
-        ESP_LOGE(TAG, "Failed to print JSON payload for status update");
-        result = ESP_ERR_NO_MEM;
-        goto cleanup;
+    size_t heap_before_print = esp_get_free_heap_size();
+    ESP_LOGI(TAG, "Heap before cJSON_Print: %zu bytes", heap_before_print);
+
+    json_payload = cJSON_PrintUnformatted(root_array);
+
+    size_t json_length = strlen(json_payload);
+    ESP_LOGI(TAG, "cJSON_PrintUnformatted returned %zu bytes (expected ~%zu)", json_length, strlen(enhanced_status) + 200);
+
+    // Check if the JSON contains the full status message
+    if (!strstr(json_payload, enhanced_status + strlen(enhanced_status) - 50)) {
+        ESP_LOGE(TAG, "JSON appears truncated - status message was cut off by cJSON");
+        ESP_LOGE(TAG, "Input message size: %zu bytes, JSON size: %zu bytes", strlen(enhanced_status), json_length);
+
+        // Try to create a truncated version that will fit
+        char truncated_status[2000];
+        snprintf(truncated_status, sizeof(truncated_status), "%.1950s... [TRUNCATED]", enhanced_status);
+
+        // Replace the status field with truncated version
+        cJSON_SetValuestring(cJSON_GetObjectItem(status_object, "status"), truncated_status);
+
+        // Re-generate JSON
+        free(json_payload);
+        json_payload = cJSON_Print(root_array);
+        if (json_payload) {
+            ESP_LOGI(TAG, "Regenerated JSON with truncated message: %zu bytes", strlen(json_payload));
+        }
+    }
+
+    if (!strstr(json_payload, "}]")) {
+        ESP_LOGE(TAG, "JSON appears truncated - missing closing brackets");
     }
 
     ESP_LOGI(TAG, "Sending status update: '%s'", enhanced_status);

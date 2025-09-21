@@ -21,4 +21,6 @@
 typedef struct {
     time_t timestamp;
     float lux;
+    float chip_temp_c;  // Celsius
+    float chip_temp_f;  // Fahrenheit
 } sensor_reading_t;

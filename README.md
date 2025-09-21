@@ -113,7 +113,7 @@ I (25489) SENSOR_TASK: Reading #1 saved (Lux: 4.00)
 
 I (310489) SENSOR_TASK: Reading #20 saved (Lux: 8.00)
 I (319249) TIME_UTILS: Local time: 2025-09-15 16:48:03 (22:00-04:00) - DAY (active)
-I (319249) SEND_DATA_TASK: Data send interval reached. Connecting to Wi-Fi...
+I (319249) SEND_DATA_TASK: Data send interval reached. Connecting to WiFi...
 I (319249) wifi:Set ps type: 0, coexist: 0
 
 I (319249) SEND_DATA_TASK: Sending 20 batched readings.

@@ -172,7 +172,7 @@ bool send_readings_processor(sensor_reading_t* readings, int count) {
 }
 
 bool save_readings_processor(sensor_reading_t* readings, int count) {
-    ESP_LOGI(TAG, "Saving %d readings to persistent storage due to Wi-Fi failure", count);
+    ESP_LOGI(TAG, "Saving %d readings to persistent storage due to WiFi failure", count);
     esp_err_t storage_err = persistent_storage_save_readings(readings, count);
     if (storage_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s", esp_err_to_name(storage_err));

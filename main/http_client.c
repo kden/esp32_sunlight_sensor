@@ -31,7 +31,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         ESP_LOGD(TAG, "HTTP_EVENT_ERROR");
         break;
     case HTTP_EVENT_ON_CONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_CONNECTED");
+        ESP_LOGI(TAG, "HTTP connection established");
         break;
     case HTTP_EVENT_HEADER_SENT:
         ESP_LOGD(TAG, "HTTP_EVENT_HEADER_SENT");
@@ -43,10 +43,10 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt)
         ESP_LOGD(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
         break;
     case HTTP_EVENT_ON_FINISH:
-        ESP_LOGD(TAG, "HTTP_EVENT_ON_FINISH");
+        ESP_LOGI(TAG, "HTTP request completed");
         break;
     case HTTP_EVENT_DISCONNECTED:
-        ESP_LOGD(TAG, "HTTP_EVENT_DISCONNECTED");
+        ESP_LOGI(TAG, "HTTP connection closed");
         break;
     case HTTP_EVENT_REDIRECT:
         ESP_LOGD(TAG, "HTTP_EVENT_REDIRECT");
@@ -64,6 +64,11 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
         return ESP_ERR_INVALID_ARG;
     }
 
+    size_t payload_size = strlen(json_payload);
+    ESP_LOGI(TAG, "HTTP request starting - URL: %s", CONFIG_API_URL);
+    ESP_LOGI(TAG, "HTTP payload size: %zu bytes (heap: %zu bytes)",
+             payload_size, esp_get_free_heap_size());
+
     const char *cert_pem = (const char *)_binary_server_cert_pem_start;
 
     esp_http_client_config_t config = {
@@ -73,6 +78,7 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
         .timeout_ms = 30000, // 30 second timeout
     };
 
+    ESP_LOGI(TAG, "Initializing HTTP client");
     client = esp_http_client_init(&config);
     if (client == NULL) {
         ESP_LOGE(TAG, "Failed to initialize HTTP client");
@@ -80,6 +86,7 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
     }
 
     // Set HTTP method and headers
+    ESP_LOGI(TAG, "Setting HTTP method to POST");
     err = esp_http_client_set_method(client, HTTP_METHOD_POST);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set HTTP method: %s", esp_err_to_name(err));
@@ -87,6 +94,7 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
         return err;
     }
 
+    ESP_LOGI(TAG, "Setting Content-Type header");
     err = esp_http_client_set_header(client, "Content-Type", "application/json");
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set Content-Type header: %s", esp_err_to_name(err));
@@ -96,6 +104,7 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
 
     char auth_header[128];
     snprintf(auth_header, sizeof(auth_header), "Bearer %s", bearer_token);
+    ESP_LOGI(TAG, "Setting Authorization header");
     err = esp_http_client_set_header(client, "Authorization", auth_header);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set Authorization header: %s", esp_err_to_name(err));
@@ -103,7 +112,8 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
         return err;
     }
 
-    err = esp_http_client_set_post_field(client, json_payload, strlen(json_payload));
+    ESP_LOGI(TAG, "Setting POST data (%zu bytes)", payload_size);
+    err = esp_http_client_set_post_field(client, json_payload, payload_size);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to set POST data: %s", esp_err_to_name(err));
         esp_http_client_cleanup(client);
@@ -111,6 +121,7 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
     }
 
     // Perform the HTTP request
+    ESP_LOGI(TAG, "Performing HTTP request (timeout: 30s)");
     err = esp_http_client_perform(client);
     if (err == ESP_OK) {
         int status_code = esp_http_client_get_status_code(client);
@@ -152,5 +163,6 @@ esp_err_t http_send_json_payload(const char* json_payload, const char* bearer_to
     }
 
     esp_http_client_cleanup(client);
+    ESP_LOGI(TAG, "HTTP client cleaned up, returning: %s", esp_err_to_name(err));
     return err;
 }

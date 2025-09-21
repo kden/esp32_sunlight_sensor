@@ -100,6 +100,33 @@ static const char* wifi_reason_to_str(uint8_t reason)
 #endif
 }
 
+static const char* wifi_event_to_str(int32_t event_id) {
+#if CONFIG_LOG_MAXIMUM_LEVEL >= 3
+    switch(event_id) {
+        case WIFI_EVENT_WIFI_READY: return "WIFI_READY";
+        case WIFI_EVENT_SCAN_DONE: return "SCAN_DONE";
+        case WIFI_EVENT_STA_START: return "STA_START";
+        case WIFI_EVENT_STA_STOP: return "STA_STOP";
+        case WIFI_EVENT_STA_CONNECTED: return "STA_CONNECTED";
+        case WIFI_EVENT_STA_DISCONNECTED: return "STA_DISCONNECTED";
+        case WIFI_EVENT_STA_AUTHMODE_CHANGE: return "STA_AUTHMODE_CHANGE";
+        case WIFI_EVENT_STA_WPS_ER_SUCCESS: return "STA_WPS_ER_SUCCESS";
+        case WIFI_EVENT_STA_WPS_ER_FAILED: return "STA_WPS_ER_FAILED";
+        case WIFI_EVENT_STA_WPS_ER_TIMEOUT: return "STA_WPS_ER_TIMEOUT";
+        case WIFI_EVENT_STA_WPS_ER_PIN: return "STA_WPS_ER_PIN";
+        case WIFI_EVENT_AP_START: return "AP_START";
+        case WIFI_EVENT_AP_STOP: return "AP_STOP";
+        case WIFI_EVENT_AP_STACONNECTED: return "AP_STACONNECTED";
+        case WIFI_EVENT_AP_STADISCONNECTED: return "AP_STADISCONNECTED";
+        case WIFI_EVENT_AP_PROBEREQRECVED: return "AP_PROBEREQRECVED";
+        default: return "UNKNOWN_EVENT";
+    }
+#else
+    // For builds with low verbosity, return an empty string.
+    // The ESP_LOGE call will still print the numeric reason code.
+    return "";
+#endif
+}
 
 typedef struct
 {
@@ -119,21 +146,42 @@ static void try_to_connect(void);
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
 {
+    ESP_LOGI(TAG, "WiFi event: %s (%s id=%ld)",
+             wifi_event_to_str(event_id), event_base, event_id);
+
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
     {
-        try_to_connect(); // Start connection attempts when Wi-Fi stack is ready
+        ESP_LOGI(TAG, "WiFi stack started - beginning connection sequence");
+        try_to_connect(); // Start connection attempts when WiFi stack is ready
     }
     else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
     {
         wifi_event_sta_disconnected_t* event = (wifi_event_sta_disconnected_t*)event_data;
-        ESP_LOGE(TAG, "Wi-Fi disconnected, reason: %d (%s)",
+        ESP_LOGE(TAG, "WiFi disconnected, reason: %d (%s)",
                  event->reason, wifi_reason_to_str(event->reason));
+        ESP_LOGI(TAG, "Retry state: attempt %d/%d, network %d/%d",
+                 s_reconnect_retries, MAX_RECONNECT_RETRIES,
+                 s_current_network_index + 1, s_num_networks);
         s_is_connected = false;
+
+        // Add safety checks to prevent crashes during WiFi issues
+        if (event->reason == WIFI_REASON_NO_AP_FOUND ||
+            event->reason == WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY ||
+            event->reason == WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD ||
+            event->reason == WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD) {
+            ESP_LOGW(TAG, "No AP found - adding delay to prevent system instability");
+            vTaskDelay(pdMS_TO_TICKS(5000)); // 5 second delay for AP not found errors
+        }
+
         if (s_reconnect_retries < MAX_RECONNECT_RETRIES)
         {
             s_reconnect_retries++;
             ESP_LOGI(TAG, "Retrying connection to '%s' (attempt %d/%d)...",
                      s_wifi_networks[s_current_network_index].ssid, s_reconnect_retries, MAX_RECONNECT_RETRIES);
+
+            // Add delay before all reconnection attempts to reduce system stress
+            vTaskDelay(pdMS_TO_TICKS(2000)); // 2 second delay before retry
+            ESP_LOGI(TAG, "Initiating reconnection attempt");
             esp_wifi_connect();
         }
         else
@@ -142,6 +190,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                      s_wifi_networks[s_current_network_index].ssid);
             s_current_network_index = (s_current_network_index + 1) % s_num_networks;
             s_reconnect_retries = 0;
+
+            // Add delay before trying next network
+            vTaskDelay(pdMS_TO_TICKS(3000)); // 3 second delay before next network
+            ESP_LOGI(TAG, "Switching to next network in list");
             try_to_connect(); // Try the next network in the list
         }
     }
@@ -150,6 +202,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
         ESP_LOGI(TAG, "Successfully connected to '%s' with IP: " IPSTR, s_wifi_networks[s_current_network_index].ssid,
                  IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Connection successful - resetting retry counters");
         s_reconnect_retries = 0;
         s_is_connected = true;
     }
@@ -157,10 +210,11 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
 
 static void parse_wifi_credentials()
 {
+    ESP_LOGI(TAG, "Parsing WiFi credentials string");
     char* wifi_credentials_copy = strdup(CONFIG_WIFI_CREDENTIALS);
     if (wifi_credentials_copy == NULL)
     {
-        ESP_LOGE(TAG, "Failed to allocate memory for Wi-Fi credentials.");
+        ESP_LOGE(TAG, "Failed to allocate memory for WiFi credentials.");
         return;
     }
 
@@ -177,24 +231,27 @@ static void parse_wifi_credentials()
             strncpy(s_wifi_networks[s_num_networks].ssid, ssid, sizeof(s_wifi_networks[s_num_networks].ssid) - 1);
             strncpy(s_wifi_networks[s_num_networks].password, password,
                     sizeof(s_wifi_networks[s_num_networks].password) - 1);
+            ESP_LOGI(TAG, "Added network %d: %s", s_num_networks, ssid);
             s_num_networks++;
         }
         network_str = strtok_r(NULL, ";", &network_str_saveptr);
     }
     free(wifi_credentials_copy);
-    ESP_LOGI(TAG, "Found %d Wi-Fi networks in credentials.", s_num_networks);
+    ESP_LOGI(TAG, "Found %d WiFi networks in credentials.", s_num_networks);
 }
 
 static void try_to_connect(void)
 {
     if (s_num_networks == 0)
     {
-        ESP_LOGE(TAG, "No Wi-Fi networks configured.");
+        ESP_LOGE(TAG, "No WiFi networks configured.");
         return;
     }
 
-    ESP_LOGI(TAG, "Attempting to connect to network: %s", s_wifi_networks[s_current_network_index].ssid);
+    ESP_LOGI(TAG, "Attempting to connect to network: %s (heap: %zu bytes)",
+             s_wifi_networks[s_current_network_index].ssid, esp_get_free_heap_size());
 
+    // Declare wifi_config first
     wifi_config_t wifi_config = {
         .sta = {
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
@@ -204,17 +261,50 @@ static void try_to_connect(void)
     strncpy((char*)wifi_config.sta.password, s_wifi_networks[s_current_network_index].password,
             sizeof(wifi_config.sta.password));
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    // Now try to set the config with retry logic
+    int retry_count = 0;
+    while (retry_count < 5) {
+        esp_err_t config_err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        if (config_err == ESP_OK) {
+            ESP_LOGI(TAG, "WiFi config set successfully");
+            break;
+        } else if (config_err == ESP_ERR_WIFI_STATE) {
+            ESP_LOGW(TAG, "WiFi in transitional state, waiting... (attempt %d/5)", retry_count + 1);
+            vTaskDelay(pdMS_TO_TICKS(1000)); // Wait 1 second
+            retry_count++;
+        } else {
+            ESP_LOGE(TAG, "Failed to set WiFi config: %s", esp_err_to_name(config_err));
+            return;
+        }
+    }
+
+    if (retry_count >= 5) {
+        ESP_LOGE(TAG, "Failed to set WiFi config after 5 attempts - WiFi state issue");
+        return;
+    }
+
+    ESP_LOGI(TAG, "WiFi config set - initiating connection");
     esp_wifi_connect();
 }
 
 void wifi_manager_init(void)
 {
+    ESP_LOGI(TAG, "WiFi manager initialization starting");
+
     // This block contains one-time initializations and should only run once.
     if (!s_is_initialized) {
+        ESP_LOGI(TAG, "First-time WiFi initialization");
         ESP_ERROR_CHECK(esp_netif_init());
         ESP_ERROR_CHECK(esp_event_loop_create_default());
-        esp_netif_create_default_wifi_sta();
+        esp_netif_t* sta_netif = esp_netif_create_default_wifi_sta();
+
+        // Set hostname to sensor ID
+        esp_err_t hostname_err = esp_netif_set_hostname(sta_netif, CONFIG_SENSOR_ID);
+        if (hostname_err == ESP_OK) {
+            ESP_LOGI(TAG, "Hostname set to: %s", CONFIG_SENSOR_ID);
+        } else {
+            ESP_LOGW(TAG, "Failed to set hostname: %s", esp_err_to_name(hostname_err));
+        }
 
         wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
         ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -225,14 +315,16 @@ void wifi_manager_init(void)
         ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL, NULL));
 
         s_is_initialized = true;
-        ESP_LOGI(TAG, "Wi-Fi system initialized.");
+        ESP_LOGI(TAG, "WiFi system initialized.");
+    } else {
+        ESP_LOGI(TAG, "WiFi already initialized - restarting");
     }
 
-    // These functions are safe to call multiple times to start/restart the Wi-Fi connection.
+    // These functions are safe to call multiple times to start/restart the WiFi connection.
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_start());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
-
+    ESP_LOGI(TAG, "WiFi stack started in station mode");
 }
 
 bool wifi_is_connected(void)

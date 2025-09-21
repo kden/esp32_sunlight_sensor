@@ -26,6 +26,6 @@ typedef struct {
     int *reading_idx;
     int buffer_size;
     SemaphoreHandle_t buffer_mutex;
-    bool wifi_send_failed;  // Flag to indicate if the last Wi-Fi send failed
+    bool wifi_send_failed;  // Flag to indicate if the last WiFi send failed
 } app_context_t;
 

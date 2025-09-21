@@ -1,7 +1,7 @@
 /**
 * @file crash_handler.h
  *
- * Reports the device's reset reason on boot.
+ * Reports the device's reset reason on boot and sends logs for analysis.
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
@@ -14,9 +14,9 @@
 
 /**
  * @brief Checks the device's reset reason on boot. If the last reset was
- *        due to a crash, it sends a status report via HTTP.
+ *        due to a crash OR manual reset, it sends a status report with logs.
  *
  * This function should be called early in the boot process, after NVS has
- * been initialized. It will manage its own Wi-Fi connection to send the report.
+ * been initialized. It will manage its own WiFi connection to send the report.
  */
 void check_and_report_crash(void);

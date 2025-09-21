@@ -98,7 +98,7 @@ void send_wifi_connection_status(bool is_initial_connection) {
                      (char *)wifi_config.sta.ssid);
         }
     } else {
-        ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
+        ESP_LOGE(TAG, "Failed to get WiFi config, sending generic status.");
         if (ip_err == ESP_OK && rssi_err == ESP_OK) {
             snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s %ddBm", ip_address, rssi);
         } else if (ip_err == ESP_OK) {
@@ -177,5 +177,5 @@ void handle_ntp_sync(time_t *last_ntp_sync_time, bool is_initial_boot) {
 void disconnect_wifi_for_power_saving(void) {
     esp_wifi_disconnect();
     esp_wifi_stop();
-    ESP_LOGI(TAG, "Wi-Fi disconnected to save power.");
+    ESP_LOGI(TAG, "WiFi disconnected to save power.");
 }
