@@ -71,7 +71,7 @@ def clean_build_artifacts(sensor_id):
     print(f"\n[INFO] Cleaning build artifacts for {sensor_id}")
 
     # Clean PlatformIO build
-    if not run_command(f"SENSOR_ENV={sensor_id} pio run -e {sensor_id} -t clean",
+    if not run_command(f"SENSOR_ENV={sensor_id} pio run -e dynamic_sensor -t clean",
                        "Cleaning PlatformIO build"):
         print("[WARN] PlatformIO clean command failed, continuing...")
 
