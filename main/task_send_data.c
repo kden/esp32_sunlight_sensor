@@ -21,7 +21,7 @@
 #include "persistent_storage.h"
 #include <stdlib.h>
 #include <time.h>
-#include <string.h> // Required for strcmp
+#include <string.h>
 
 #define TAG "SEND_DATA_TASK"
 
@@ -276,7 +276,7 @@ static bool send_sensor_data_with_retry(const sensor_reading_t* readings, int co
 }
 
 /**
- * @brief Send status update with retry mechanism - NOW WITH REAL ERROR DETECTION
+ * @brief Send status update with retry mechanism
  */
 static bool send_status_update_with_retry(const char* status_message, const char* sensor_id,
                                          const char* bearer_token) {
@@ -402,16 +402,38 @@ void task_send_data(void *arg) {
     if (wifi_is_connected()) {
         ESP_LOGI(TAG, "Wi-Fi connected, performing initial time sync.");
 
-        // Send WiFi connection status
+        // Send WiFi connection status with signal strength and IP
         wifi_config_t wifi_config;
+        char ip_address[16];
+        char status_msg[128];
+        int8_t rssi;
+
+        esp_err_t ip_err = wifi_get_ip_address(ip_address, sizeof(ip_address));
+        esp_err_t rssi_err = wifi_get_rssi(&rssi);
+
         if (esp_wifi_get_config(WIFI_IF_STA, &wifi_config) == ESP_OK) {
-            char status_msg[64];
-            snprintf(status_msg, sizeof(status_msg), "wifi connected to %s", (char *)wifi_config.sta.ssid);
-            send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            if (ip_err == ESP_OK && rssi_err == ESP_OK) {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s %ddBm",
+                         (char *)wifi_config.sta.ssid, ip_address, rssi);
+            } else if (ip_err == ESP_OK) {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s IP %s",
+                         (char *)wifi_config.sta.ssid, ip_address);
+            } else {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected to %s",
+                         (char *)wifi_config.sta.ssid);
+            }
         } else {
             ESP_LOGE(TAG, "Failed to get Wi-Fi config, sending generic status.");
-            send_status_update_with_retry("wifi connected", CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
+            if (ip_err == ESP_OK && rssi_err == ESP_OK) {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s %ddBm", ip_address, rssi);
+            } else if (ip_err == ESP_OK) {
+                snprintf(status_msg, sizeof(status_msg), "wifi connected IP %s", ip_address);
+            } else {
+                strcpy(status_msg, "wifi connected");
+            }
         }
+
+        send_status_update_with_retry(status_msg, CONFIG_SENSOR_ID, CONFIG_BEARER_TOKEN);
 
         // Always attempt NTP sync on successful connection if time is invalid
         // This is the initial boot sync, so send status update

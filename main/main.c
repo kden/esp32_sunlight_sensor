@@ -31,6 +31,7 @@
 #include "app_context.h"
 #include "crash_handler.h"
 #include "persistent_storage.h"
+#include "log_capture.h"  // ADD THIS
 
 #define TAG "MAIN"
 
@@ -48,6 +49,17 @@ static int g_reading_idx = 0;
 
 void app_main(void)
 {
+    // Initialize non-volatile storage FIRST
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    // Initialize log capture EARLY - before other logging happens
+    log_capture_init();
+
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
     const i2c_master_bus_config_t i2c0_bus_cfg = I2C0_MASTER_CONFIG_DEFAULT;
@@ -56,14 +68,6 @@ void app_main(void)
     // Initialize the light sensor
     bh1750_handle_t light_sensor_hdl = NULL;
     ESP_ERROR_CHECK(init_light_sensor(i2c0_bus_hdl, &light_sensor_hdl));
-
-    // Initialize non-volatile storage.
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
 
     // Initialize persistent storage for sensor readings
     err = persistent_storage_init();
@@ -88,7 +92,6 @@ void app_main(void)
     app_context_t *app_context = malloc(sizeof(app_context_t));
     if (app_context == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for app context!");
-        // In a real scenario, you might want to restart here.
         return;
     }
 
@@ -113,6 +116,4 @@ void app_main(void)
     xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
-    // The main task has nothing else to do, so it can be deleted.
-    // vTaskDelete(NULL); // Or just let it exit.
 }

@@ -229,10 +229,10 @@ esp_err_t persistent_storage_get_count(int* count) {
     if (count == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
-    *count = 0; // Default to zero
+    *count = 0;
 
-    // This function now sums up readings from all batches
     // FIX: Declare the large buffer as 'static' to move it off the stack
+    // This prevents stack overflow when called from tasks with limited stack
     static sensor_reading_t temp_buffer[PERSISTENT_STORAGE_MAX_READINGS];
     return persistent_storage_load_readings(temp_buffer, PERSISTENT_STORAGE_MAX_READINGS, count);
 }

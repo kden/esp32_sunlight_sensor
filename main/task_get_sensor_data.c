@@ -5,7 +5,7 @@
  *
  * Copyright (c) 2025 Caden Howell (cadenhowell@gmail.com)
  *
- * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4 (2025).
+ * Developed with assistance from ChatGPT 4o (2025), Google Gemini 2.5 Pro (2025) and Claude Sonnet 4.5 (2025).
  *
  * Apache 2.0 Licensed as described in the file LICENSE
  */
@@ -13,6 +13,7 @@
 #include "task_get_sensor_data.h"
 #include "app_context.h"
 #include "light_sensor.h"
+#include "internal_temp.h"
 #include "esp_log.h"
 #include "persistent_storage.h"
 #include <string.h>
@@ -26,45 +27,59 @@ void task_get_sensor_data(void *arg) {
 
     ESP_LOGI(TAG, "Sensor reading task started.");
 
+    // Initialize internal temperature sensor
+    internal_temp_init();
+
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(READING_INTERVAL_S * 1000));
 
         float lux = 0;
-        esp_err_t err = get_ambient_light(context->light_sensor_hdl, &lux);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to get light reading: %s", esp_err_to_name(err));
+        float chip_temp_c = 0;
+
+        esp_err_t light_err = get_ambient_light(context->light_sensor_hdl, &lux);
+        esp_err_t temp_err = internal_temp_read(&chip_temp_c);
+
+        if (light_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to get light reading: %s", esp_err_to_name(light_err));
             continue;
         }
 
         time_t now;
         time(&now);
 
-        // Lock the mutex to safely access the shared buffer
         if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
 
-            // FIX: The logic is now simplified. If the buffer is full, we handle it
-            // in a single, consistent way to prevent data loss and logic errors.
             if (*(context->reading_idx) >= context->buffer_size) {
                 ESP_LOGW(TAG, "Reading buffer is full. Saving batch to persistent storage to prevent data loss.");
-
-                // Save the full buffer to NVS. This is the safest action.
                 esp_err_t storage_err = persistent_storage_save_readings(context->reading_buffer, context->buffer_size);
                 if (storage_err != ESP_OK) {
                     ESP_LOGE(TAG, "Failed to save full buffer to persistent storage: %s", esp_err_to_name(storage_err));
                 }
-
-                // After saving, reset the buffer index to start a new batch.
                 *(context->reading_idx) = 0;
             }
 
-            // Now, add the new reading to the buffer at the correct index.
             context->reading_buffer[*(context->reading_idx)].timestamp = now;
             context->reading_buffer[*(context->reading_idx)].lux = lux;
-            (*(context->reading_idx))++; // Increment index for the next reading
 
-            ESP_LOGI(TAG, "Reading #%d saved (Lux: %.2f)", *(context->reading_idx), lux);
+            if (temp_err == ESP_OK) {
+                context->reading_buffer[*(context->reading_idx)].chip_temp_c = chip_temp_c;
+                context->reading_buffer[*(context->reading_idx)].chip_temp_f = (chip_temp_c * 9.0f / 5.0f) + 32.0f;
+            } else {
+                context->reading_buffer[*(context->reading_idx)].chip_temp_c = -999.0f;
+                context->reading_buffer[*(context->reading_idx)].chip_temp_f = -999.0f;
+            }
 
-            // Release the mutex
+            (*(context->reading_idx))++;
+
+            if (temp_err == ESP_OK) {
+                ESP_LOGI(TAG, "Reading #%d saved (Lux: %.2f, Chip: %.1f°C/%.1f°F)",
+                         *(context->reading_idx), lux, chip_temp_c,
+                         context->reading_buffer[*(context->reading_idx) - 1].chip_temp_f);
+            } else {
+                ESP_LOGI(TAG, "Reading #%d saved (Lux: %.2f, Chip: temp error)",
+                         *(context->reading_idx), lux);
+            }
+
             xSemaphoreGive(context->buffer_mutex);
         }
     }

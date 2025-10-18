@@ -211,7 +211,10 @@ static esp_err_t _send_sensor_data_chunk(const sensor_reading_t* readings, int c
         if (cJSON_AddNumberToObject(sensor_object, "light_intensity", readings[i].lux) == NULL ||
             cJSON_AddStringToObject(sensor_object, "sensor_id", sensor_id) == NULL ||
             cJSON_AddStringToObject(sensor_object, "timestamp", timestamp_str) == NULL ||
-            cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET) == NULL) {
+            cJSON_AddStringToObject(sensor_object, "sensor_set_id", CONFIG_SENSOR_SET) == NULL ||
+            cJSON_AddNumberToObject(sensor_object, "chip_temp_c", readings[i].chip_temp_c) == NULL ||
+            cJSON_AddNumberToObject(sensor_object, "chip_temp_f", readings[i].chip_temp_f) == NULL)
+        {
             ESP_LOGE(TAG, "Failed to add fields to sensor object for reading #%d", i);
             cJSON_Delete(sensor_object);
             break;
