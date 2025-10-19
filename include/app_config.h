@@ -40,29 +40,15 @@
 #include <driver/i2c_master.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include "generated_config.h"
+
 
 #define TSK_MINIMAL_STACK_SIZE         (1024)
 #define I2C0_MASTER_PORT               I2C_NUM_0
 
-// Provide default pin definitions if they are not set by the build environment
-#ifndef CONFIG_SENSOR_SDA_GPIO
-#define CONFIG_SENSOR_SDA_GPIO 21
-#endif
-#ifndef CONFIG_SENSOR_SCL_GPIO
-#define CONFIG_SENSOR_SCL_GPIO 22
-#endif
-//
 #define I2C0_TASK_SAMPLING_RATE        (10) // seconds
 #define I2C0_TASK_STACK_SIZE           (TSK_MINIMAL_STACK_SIZE * 8)
 #define I2C0_TASK_PRIORITY             (tskIDLE_PRIORITY + 2)
-
-#define UTILS_TASK_SAMPLING_RATE       (30) // seconds
-#define UTILS_TASK_STACK_SIZE          (TSK_MINIMAL_STACK_SIZE * 8)
-#define UTILS_TASK_PRIORITY            (tskIDLE_PRIORITY + 2)
-
-#define SCH_TASK_SAMPLING_RATE         (30) // seconds
-#define SCH_TASK_STACK_SIZE            (TSK_MINIMAL_STACK_SIZE * 8)
-#define SCH_TASK_PRIORITY              (tskIDLE_PRIORITY + 2)
 
 #define APP_TAG                         "SUNLIGHT SENSOR [APP]"
 
@@ -75,11 +61,5 @@
         .sda_io_num                     = CONFIG_SENSOR_SDA_GPIO,   \
         .glitch_ignore_cnt              = 7,                        \
         .flags.enable_internal_pullup   = true, }
-
-
-static inline void vTaskDelaySecUntil(TickType_t *previousWakeTime, const uint sec) {
-    const TickType_t xFrequency = ((sec * 1000) / portTICK_PERIOD_MS);
-    vTaskDelayUntil( previousWakeTime, xFrequency );
-}
 
 /**@}*/

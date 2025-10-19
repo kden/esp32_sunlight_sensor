@@ -15,6 +15,7 @@
 #include "cJSON.h"
 #include "http.h"
 #include "sensor_data.h"
+#include "wifi.h"
 #include "git_version.h" // Include the auto-generated header
 #include <time.h>
 #include <string.h>
@@ -349,6 +350,12 @@ esp_err_t send_status_update_with_status(const char* status_message, const char*
     cJSON_AddStringToObject(status_object, "commit_sha", GIT_COMMIT_SHA);
     cJSON_AddStringToObject(status_object, "commit_timestamp", GIT_COMMIT_TIMESTAMP);
 
+    // Add WiFi signal strength if available
+    int8_t rssi;
+    if (wifi_get_rssi(&rssi) == ESP_OK) {
+        cJSON_AddNumberToObject(status_object, "wifi_dbm", rssi);
+    }
+
     cJSON_AddItemToArray(root_array, status_object);
 
     json_payload = cJSON_Print(root_array);
@@ -368,7 +375,6 @@ cleanup:
     if (json_payload) free(json_payload);
     return result;
 }
-
 // Legacy functions for backward compatibility
 void send_sensor_data(const sensor_reading_t* readings, int count, const char* sensor_id, const char* bearer_token) {
     esp_err_t result = send_sensor_data_with_status(readings, count, sensor_id, bearer_token);

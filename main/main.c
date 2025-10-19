@@ -31,7 +31,6 @@
 #include "app_context.h"
 #include "crash_handler.h"
 #include "persistent_storage.h"
-#include "log_capture.h"  // ADD THIS
 
 #define TAG "MAIN"
 
@@ -39,7 +38,6 @@
 #define MAX_SSID_LEN 32
 #define MAX_PASS_LEN 64
 #define BATCH_POST_INTERVAL_S (5 * 60) // 5 minutes
-// We read every 15 seconds
 #define READING_INTERVAL_S 15
 #define READING_BUFFER_SIZE (BATCH_POST_INTERVAL_S / READING_INTERVAL_S)
 
@@ -57,8 +55,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    // Initialize log capture EARLY - before other logging happens
-    log_capture_init();
+    // REMOVED: log_capture_init();
 
     // Initialize I2C
     i2c_master_bus_handle_t i2c0_bus_hdl;
@@ -85,7 +82,7 @@ void app_main(void)
         }
     }
 
-    // Check if the last reset was due to a crash and report it.
+    // Check if the last reset was due to a crash and log it
     check_and_report_crash();
 
     // Create the application context to share resources with tasks
@@ -100,7 +97,7 @@ void app_main(void)
     app_context->reading_idx = &g_reading_idx;
     app_context->buffer_size = READING_BUFFER_SIZE;
     app_context->buffer_mutex = xSemaphoreCreateMutex();
-    app_context->wifi_send_failed = false;  // Initialize failure flag
+    app_context->wifi_send_failed = false;
 
     if (app_context->buffer_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex!");
@@ -108,12 +105,10 @@ void app_main(void)
         return;
     }
 
-    // Create and launch the tasks with increased stack sizes to prevent stack overflow
-    // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);  // Increased from 4096
-    // Give the send_data_task time to connect and perform the initial NTP sync
+    // Create and launch the tasks
+    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);
     vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
+    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);
 
     ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
 }

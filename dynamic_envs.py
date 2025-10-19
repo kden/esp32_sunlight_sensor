@@ -19,7 +19,6 @@ sensor_env = os.getenv("SENSOR_ENV", "sensor_1")
 
 if not sensor_env:
     print("SENSOR_ENV not set. Skipping dynamic configuration.")
-    # Exit cleanly if no environment is specified
     env.Exit(0)
 
 config_file = "credentials.ini"
@@ -44,7 +43,7 @@ if not config.has_section(sensor_env):
 
 try:
     url = config.get("all_sensors", "url")
-    sensor_set_id = config.get("all_sensors", "sensor_set_id")
+    sensor_set_id = config.get(sensor_env, "sensor_set_id")
     sensor_id = config.get(sensor_env, "sensor_id")
     bearer_token = config.get(sensor_env, "bearer_token")
     wifi_cred = config.get(sensor_env, "wifi_credentials")
@@ -55,25 +54,28 @@ except configparser.NoOptionError as e:
     print(f"Error: Missing configuration in section '[{sensor_env}]'. {e}")
     env.Exit(1)
 
-#
-# Use 'env.Append(BUILD_FLAGS=...)'
-# This directly adds flags to the compiler command line.
-# We wrap the values in escaped quotes to handle them as strings in C.
-#
-env.Append(
-    BUILD_FLAGS=[
-        f'-D CONFIG_SENSOR_ID=\\"{sensor_id}\\"',
-        f'-D CONFIG_BEARER_TOKEN=\\"{bearer_token}\\"',
-        f'-D CONFIG_WIFI_CREDENTIALS=\\"{wifi_cred}\\"',
-        f'-D CONFIG_API_URL=\\"{url}\\"',
-        f'-D CONFIG_SENSOR_SET=\\"{sensor_set_id}\\"',
-        f'-D CONFIG_SENSOR_SDA_GPIO={sda_gpio}',
-        f'-D CONFIG_SENSOR_SCL_GPIO={scl_gpio}'
-    ]
-)
+# Create a header file instead of using build flags
+# This avoids shell escaping issues with special characters
+header_content = f'''/**
+ * Auto-generated configuration file
+ * DO NOT EDIT MANUALLY
+ */
+#pragma once
 
-# If this is run in CICD and credentials are logged, they'll be leaked.
-print("Successfully applied build flags:")
+#define CONFIG_SENSOR_ID "{sensor_id}"
+#define CONFIG_BEARER_TOKEN "{bearer_token}"
+#define CONFIG_WIFI_CREDENTIALS "{wifi_cred}"
+#define CONFIG_API_URL "{url}"
+#define CONFIG_SENSOR_SET "{sensor_set_id}"
+#define CONFIG_SENSOR_SDA_GPIO {sda_gpio}
+#define CONFIG_SENSOR_SCL_GPIO {scl_gpio}
+'''
+
+# Write the header file
+with open("include/generated_config.h", "w") as f:
+    f.write(header_content)
+
+print("Successfully generated configuration header:")
 print(f"  - SENSOR_ID: {sensor_id}")
 print(f"  - BEARER_TOKEN: redacted")
 print(f"  - WIFI_CREDENTIALS: redacted")

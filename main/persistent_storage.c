@@ -14,7 +14,6 @@
  */
 
 #include "persistent_storage.h"
-#include "nvs_flash.h"
 #include "nvs.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -231,8 +230,6 @@ esp_err_t persistent_storage_get_count(int* count) {
     }
     *count = 0;
 
-    // FIX: Declare the large buffer as 'static' to move it off the stack
-    // This prevents stack overflow when called from tasks with limited stack
     static sensor_reading_t temp_buffer[PERSISTENT_STORAGE_MAX_READINGS];
     return persistent_storage_load_readings(temp_buffer, PERSISTENT_STORAGE_MAX_READINGS, count);
 }
