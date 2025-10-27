@@ -6,7 +6,7 @@
 
 # for file in  CMakeLists.txt include/*.h main/*.c main/CMakeLists.txt platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py components/*/*; do
 
-for file in  CMakeLists.txt include/*.h main/*.c main/CMakeLists.txt platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py; do
+for file in  CMakeLists.txt include/*.h main/*.c main/CMakeLists.txt platformio.ini sdkconfig.defaults credentials.ini.example dynamic_envs.py build.py; do
   if [ -f "$file" ]; then
     echo "----------"
     echo "$file"

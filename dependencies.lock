@@ -20,5 +20,5 @@ direct_dependencies:
 - i2cdev
 - idf
 manifest_hash: ab88d2799f7269c668ea729c329d9bb19c95758c9d48d244c1e714f7d6053ee3
-target: esp32s3
+target: esp32c3
 version: 2.0.0

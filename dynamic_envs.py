@@ -45,7 +45,7 @@ try:
 
     night_start_hour = config.get(sensor_env, "night_start_hour", fallback="22")
     night_end_hour = config.get(sensor_env, "night_end_hour", fallback="4")
-    local_timezone = config.get(sensor_env, "local_timezone", fallback="CST6CDT,M3.2.0,M11.1.0")
+    local_timezone = config.get(sensor_env, "local_timezone", fallback="CST6CDT,M3.2.0/2,M11.1.0/2")
 
 except configparser.NoOptionError as e:
     print(f"Error: Missing configuration in section '[{sensor_env}]'. {e}")
