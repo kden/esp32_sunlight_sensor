@@ -16,7 +16,6 @@
 #include "persistent_storage.h"
 #include "esp_log.h"
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 #define TAG "DATA_PROCESSOR"
@@ -95,148 +94,62 @@ bool data_processor_init(void) {
     return true;
 }
 
-bool process_buffered_readings(app_context_t *context, bool (*processor)(sensor_reading_t*, int)) {
-    sensor_reading_t *temp_buffer = malloc(context->buffer_size * sizeof(sensor_reading_t));
-    if (temp_buffer == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate temporary buffer for readings");
-        return false;
-    }
-
-    int temp_count = 0;
-    bool success = true;
-
-    if (xSemaphoreTake(context->buffer_mutex, portMAX_DELAY) == pdTRUE) {
-        if (*(context->reading_idx) > 0) {
-            memcpy(temp_buffer, context->reading_buffer,
-                   *(context->reading_idx) * sizeof(sensor_reading_t));
-            temp_count = *(context->reading_idx);
-            *(context->reading_idx) = 0;
-        }
-        xSemaphoreGive(context->buffer_mutex);
-    }
-
-    if (temp_count > 0) {
-        success = processor(temp_buffer, temp_count);
-    }
-
-    free(temp_buffer);
-    return success;
-}
-
-bool send_readings_processor(sensor_reading_t* readings, int count) {
-    ESP_LOGI(TAG, "Sending %d batched readings.", count);
-
-    // Create filtered readings
-    int filtered_count;
-    sensor_reading_t* filtered_readings = create_filtered_readings(readings, count, &filtered_count);
-
-    if (filtered_readings == NULL || filtered_count == 0) {
-        ESP_LOGW(TAG, "No valid readings to send after timestamp filtering");
-        if (filtered_readings) free(filtered_readings);
-        return true; // No valid readings is considered success
-    }
-
-    bool success = false;
-    for (int attempt = 1; attempt <= MAX_HTTP_RETRY_ATTEMPTS; attempt++) {
-        ESP_LOGI(TAG, "Sensor data send attempt %d/%d (%d filtered readings)",
-                 attempt, MAX_HTTP_RETRY_ATTEMPTS, filtered_count);
-
-        esp_err_t result = api_send_sensor_data(filtered_readings, filtered_count);
-
-        if (result == ESP_OK) {
-            ESP_LOGI(TAG, "Sensor data sent successfully on attempt %d", attempt);
-            success = true;
-            break;
-        }
-
-        ESP_LOGE(TAG, "Sensor data attempt %d failed: %s", attempt, esp_err_to_name(result));
-
-        if (result == ESP_ERR_INVALID_ARG || result == ESP_ERR_NOT_ALLOWED) {
-            ESP_LOGE(TAG, "Non-retryable error, aborting retry attempts");
-            break;
-        }
-
-        if (attempt < MAX_HTTP_RETRY_ATTEMPTS) {
-            ESP_LOGI(TAG, "Waiting %d ms before retry...", HTTP_RETRY_DELAY_MS);
-            vTaskDelay(pdMS_TO_TICKS(HTTP_RETRY_DELAY_MS));
-        }
-    }
-
-    free(filtered_readings);
-
-    if (!success) {
-        ESP_LOGE(TAG, "Sensor data send failed after %d attempts", MAX_HTTP_RETRY_ATTEMPTS);
-    }
-
-    return success;
-}
-
-bool save_readings_processor(sensor_reading_t* readings, int count) {
-    ESP_LOGI(TAG, "Saving %d readings to persistent storage due to WiFi failure", count);
-    esp_err_t storage_err = persistent_storage_save_readings(readings, count);
-    if (storage_err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to save readings to persistent storage: %s", esp_err_to_name(storage_err));
-        return false;
-    } else {
-        ESP_LOGI(TAG, "Successfully saved readings to persistent storage");
-        return true;
-    }
-}
-
 bool send_all_stored_readings(void) {
-    // Check if we have any stored readings first
     int stored_count = 0;
     esp_err_t err = persistent_storage_get_count(&stored_count);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get stored reading count: %s", esp_err_to_name(err));
-        return false;
-    }
 
-    if (stored_count == 0) {
+    if (err != ESP_OK || stored_count == 0) {
         ESP_LOGI(TAG, "No stored readings to send");
-        return true;
+        return true; // Not an error - just nothing to send
     }
 
-    // Allocate memory for stored readings
-    sensor_reading_t *stored_readings = malloc(PERSISTENT_STORAGE_MAX_READINGS * sizeof(sensor_reading_t));
+    ESP_LOGI(TAG, "Found %d stored readings to send", stored_count);
+
+    sensor_reading_t* stored_readings = malloc(stored_count * sizeof(sensor_reading_t));
     if (stored_readings == NULL) {
         ESP_LOGE(TAG, "Failed to allocate memory for stored readings");
         return false;
     }
 
-    // Load stored readings
     int loaded_count = 0;
-    err = persistent_storage_load_readings(stored_readings, PERSISTENT_STORAGE_MAX_READINGS, &loaded_count);
-    if (err != ESP_OK) {
+    err = persistent_storage_load_readings(stored_readings, stored_count, &loaded_count);
+
+    if (err != ESP_OK || loaded_count == 0) {
         ESP_LOGE(TAG, "Failed to load stored readings: %s", esp_err_to_name(err));
         free(stored_readings);
         return false;
     }
 
-    if (loaded_count == 0) {
-        ESP_LOGI(TAG, "No stored readings loaded");
-        free(stored_readings);
+    ESP_LOGI(TAG, "Loaded %d stored readings from persistent storage", loaded_count);
+
+    // Filter readings with valid timestamps
+    int filtered_count = 0;
+    sensor_reading_t* filtered_readings = create_filtered_readings(stored_readings, loaded_count, &filtered_count);
+
+    // Free the original buffer
+    free(stored_readings);
+
+    if (filtered_readings == NULL || filtered_count == 0) {
+        ESP_LOGW(TAG, "No valid readings to send after filtering");
+        if (filtered_readings) free(filtered_readings);
+        // Clear invalid readings from storage
+        persistent_storage_clear_readings();
         return true;
     }
 
-    ESP_LOGI(TAG, "Attempting to send %d stored readings", loaded_count);
+    ESP_LOGI(TAG, "Sending %d filtered stored readings", filtered_count);
 
-    // Send the stored readings
-    bool send_success = send_readings_processor(stored_readings, loaded_count);
+    // FIXED: Call api_send_sensor_data directly instead of using processor callback
+    esp_err_t send_result = api_send_sensor_data(filtered_readings, filtered_count);
 
-    if (send_success) {
-        // Clear stored readings after successful send
-        err = persistent_storage_clear_readings();
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to clear stored readings after send: %s", esp_err_to_name(err));
-            free(stored_readings);
-            return false;
-        }
-        ESP_LOGI(TAG, "Successfully sent and cleared %d stored readings", loaded_count);
+    free(filtered_readings);
+
+    if (send_result == ESP_OK) {
+        ESP_LOGI(TAG, "Successfully sent stored readings, clearing storage");
+        persistent_storage_clear_readings();
+        return true;
     } else {
-        ESP_LOGE(TAG, "Failed to send stored readings");
+        ESP_LOGE(TAG, "Failed to send stored readings: %s", esp_err_to_name(send_result));
+        return false;
     }
-
-    free(stored_readings);
-    return send_success;
 }

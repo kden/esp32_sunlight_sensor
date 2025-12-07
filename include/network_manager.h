@@ -14,7 +14,6 @@
 
 #include <time.h>
 #include <stdbool.h>
-#include "esp_err.h"
 
 /**
  * @brief Initialize network connection (WiFi)

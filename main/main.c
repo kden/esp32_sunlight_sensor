@@ -10,131 +10,392 @@
  * Apache 2.0 Licensed as described in the file LICENSE
  */
 
-#include <stdio.h>
-#include <esp_log.h>
-#include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/semphr.h"
-#include "esp_netif.h"
-#include "esp_wifi.h"
 #include "app_config.h"
-#include "sdkconfig.h"
-#include "nvs_flash.h"
-#include "task_send_data.h"
-#include "task_get_sensor_data.h"
-#include "git_version.h" // For build version info
-
+#include "network_manager.h"
 #include "light_sensor.h"
-#include "sensor_data.h"
-#include "app_context.h"
+#include "data_processor.h"
+#include "api_client.h"
 #include "crash_handler.h"
-#include "adc_battery.h"
-#include "log_capture.h"
-#include "time_utils.h"
-#include "power_management.h"
 #include "status_reporter.h"
+#include "power_management.h"
+#include "adc_battery.h"
+#include "internal_temp.h"
+#include "time_utils.h"
+#include "persistent_storage.h"
+#include "sensor_data.h"
+#include <nvs_flash.h>
+#include <time.h>
+#include <string.h>
 
 #define TAG "MAIN"
+#define MAX_READINGS_BUFFER 20
+#define MIN_VALID_TIMESTAMP 1704067200  // January 1, 2024 - readings before this are invalid
 
-#define BATCH_POST_INTERVAL_S (5 * 60) // 5 minutes
-// We read every 15 seconds
-#define READING_INTERVAL_S 15
-#define READING_BUFFER_SIZE (BATCH_POST_INTERVAL_S / READING_INTERVAL_S)
+// Application state that needs to persist
+static i2c_dev_t *light_sensor_dev = NULL;
+static sensor_reading_t reading_buffer[MAX_READINGS_BUFFER];
 
-// Shared data buffer and its current index
-static sensor_reading_t g_reading_buffer[READING_BUFFER_SIZE];
-static int g_reading_idx = 0;
+// NTP sync tracking in RTC memory
+static RTC_DATA_ATTR uint64_t last_ntp_sync_timestamp = 0;
 
-void app_main(void)
-{
-    // Initialize NVS first
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+// Forward declarations
+static void take_sensor_reading(void);
+static void send_data_to_server(void);
+static bool init_peripherals(void);
+static void handle_initial_boot(void);
+static void clear_reading_buffer(void);
+static bool is_time_valid(void);
+
+void app_main(void) {
+    // CRITICAL: Delay to allow USB serial to reconnect after deep sleep wake
+    // Without this, early log messages will be lost
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    // Get current local time for boot logging
+    time_t now;
+    time(&now);
+    struct tm timeinfo;
+    localtime_r(&now, &timeinfo);
+    char time_str[32];
+    strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+    // Print to both stdout and ESP log system for reliability
+    printf("\n\n");
+    printf("╔════════════════════════════════════════╗\n");
+    printf("║  ESP32 BOOT                            ║\n");
+    printf("╠════════════════════════════════════════╣\n");
+    printf("║  Local time:     %-21s ║\n", time_str);
+    printf("║  Reset reason:   %-21d ║\n", esp_reset_reason());
+    printf("║  Wakeup cause:   %-21d ║\n", esp_sleep_get_wakeup_cause());
+    printf("║  Free heap:      %-21lu ║\n", (unsigned long)esp_get_free_heap_size());
+    printf("╚════════════════════════════════════════╝\n");
+    printf("\n");
+
+    ESP_LOGI(TAG, "=== ESP32 Sunlight Sensor Starting ===");
+    ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)esp_get_free_heap_size());
+
+    // Check wakeup reason (used for logging in check_wakeup_reason)
+    check_wakeup_reason();
+
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGI(TAG, "Erasing NVS flash...");
         ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
+        ret = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(err);
+    ESP_ERROR_CHECK(ret);
 
-    // Initialize log capture EARLY - before other logging happens
-    log_capture_init();
+    // Initialize RTC state
+    bool rtc_restored = rtc_state_init();
+    rtc_sleep_state_t* state = rtc_state_get();
 
-    // Filter out noisy WiFi system logs - ADD THESE LINES
-    esp_log_level_set("wifi", ESP_LOG_WARN);
-    esp_log_level_set("wifi_init", ESP_LOG_WARN);
-
-    // Check wakeup reason first
-    esp_sleep_wakeup_cause_t wakeup_reason = check_wakeup_reason();
-
-    // Print the firmware version and build date
-    ESP_LOGI(TAG, "Firmware Version: %s", GIT_COMMIT_SHA);
-    ESP_LOGI(TAG, "Build Timestamp:  %s", GIT_COMMIT_TIMESTAMP);
-
-    // Note: The i2cdev library handles I2C bus initialization implicitly
-    // when we initialize the sensor, so we no longer need to do it here.
-
-    // Create the application context to share resources with tasks
-    app_context_t *app_context = malloc(sizeof(app_context_t));
-    if (app_context == NULL) {
-        ESP_LOGE(TAG, "Failed to allocate memory for app context!");
-        return;
+    // Clear reading buffer on fresh boot
+    if (!rtc_restored) {
+        clear_reading_buffer();
+        state->readings_taken = 0;
     }
-    // Zero out the context
-    memset(app_context, 0, sizeof(app_context_t));
 
-    // Initialize the light sensor using the updated API
-    ESP_ERROR_CHECK(init_light_sensor(&app_context->light_sensor_dev));
+    // Check for crash and report if needed (only on true first boot)
+    if (!rtc_restored) {
+        check_and_report_crash();
+    }
 
-    // Initialize battery monitoring (safe to call on both ESP32-C3 and ESP32-S3)
-    esp_err_t battery_err = adc_battery_init();  // Changed from battery_monitor_init()
-    if (battery_err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to initialize battery monitor: %s", esp_err_to_name(battery_err));
-        ESP_LOGW(TAG, "Continuing without battery monitoring (this is normal for USB-powered devices)");
+    // Initialize peripherals
+    if (!init_peripherals()) {
+        ESP_LOGE(TAG, "Failed to initialize peripherals");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        esp_restart();
+    }
+
+    // Initialize time keeping
+    setenv("TZ", CONFIG_LOCAL_TIMEZONE, 1);
+    tzset();
+
+    // Handle initial boot sequence (first boot only)
+    if (!rtc_restored) {
+        handle_initial_boot();
+    }
+
+    // Check if it's nighttime (unless testing flag is set)
+    bool is_night = false;
+    if (!IGNORE_NIGHTTIME_FOR_TESTING) {
+        is_night = is_nighttime_local();
     } else {
-        ESP_LOGI(TAG, "Battery monitoring initialized successfully");
+        ESP_LOGW(TAG, "⚠️  NIGHTTIME DETECTION DISABLED FOR TESTING ⚠️");
+    }
 
-        // Log initial battery status
-        char battery_status[128];
-        if (get_battery_status_string(battery_status, sizeof(battery_status))) {  // Changed function call
-            ESP_LOGI(TAG, "Initial %s", battery_status);
+    if (is_night) {
+        ESP_LOGI(TAG, "Nighttime detected");
+        log_local_time_status();
+
+        if (should_enter_deep_sleep()) {
+            uint64_t sleep_time = calculate_sleep_duration_us(true);
+            ESP_LOGI(TAG, "Entering nighttime deep sleep for %llu minutes",
+                     sleep_time / (60 * 1000000ULL));
+            enter_deep_sleep(sleep_time);
+            // Does not return
+        } else {
+            ESP_LOGI(TAG, "Skipping nighttime deep sleep (USB powered)");
+            vTaskDelay(pdMS_TO_TICKS(30000)); // Wait 30 seconds
+            esp_restart();
         }
     }
 
-    // Check if the last reset was due to a crash and report it.
-    check_and_report_crash();
-
-    // Log initial time status for debugging
+    // Daytime operation
+    ESP_LOGI(TAG, "Daytime operation mode");
     log_local_time_status();
 
-    // Check if we should immediately go back to sleep (timer wakeup during night)
-    if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER && is_nighttime_local()) {
-        ESP_LOGI(TAG, "Timer wakeup during nighttime - checking if it's time to resume normal operation");
-
-        // Try to enter sleep again - function will check conditions
-        enter_night_sleep();
-        // If we reach here, conditions weren't met for sleep (e.g., no battery, time changed)
-        ESP_LOGI(TAG, "Sleep conditions no longer met - continuing with normal operation");
+    // Take a sensor reading (only if time is valid)
+    if (is_time_valid()) {
+        take_sensor_reading();
+    } else {
+        ESP_LOGW(TAG, "Skipping reading - system time not valid yet");
     }
 
-    // Populate the rest of the application context
-    app_context->reading_buffer = g_reading_buffer;
-    app_context->reading_idx = &g_reading_idx;
-    app_context->buffer_size = READING_BUFFER_SIZE;
-    app_context->buffer_mutex = xSemaphoreCreateMutex();
-    app_context->wifi_send_failed = false;  // Initialize failure flag
+    // Check if it's time to send data
+    if (is_time_to_send_data() || state->wifi_send_failed) {
+        send_data_to_server();
+    } else {
+        ESP_LOGI(TAG, "Not time to send yet. Next send in %lu seconds",
+                 seconds_until_next_send());
+    }
 
-    if (app_context->buffer_mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create mutex!");
-        free(app_context);
+    // Calculate next sleep duration (pass false since we're treating it as daytime)
+    uint64_t sleep_time = calculate_sleep_duration_us(false);
+
+    ESP_LOGI(TAG, "Readings taken: %lu/%d", state->readings_taken, MAX_READINGS_BUFFER);
+    ESP_LOGI(TAG, "Next wake in %llu seconds", sleep_time / 1000000ULL);
+
+    // Enter deep sleep if conditions are met
+    if (should_enter_deep_sleep()) {
+        // Get current local time
+        time(&now);
+        localtime_r(&now, &timeinfo);
+        strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S", &timeinfo);
+
+        ESP_LOGI(TAG, "╔════════════════════════════════════════╗");
+        ESP_LOGI(TAG, "║  SLEEP SUMMARY                         ║");
+        ESP_LOGI(TAG, "╠════════════════════════════════════════╣");
+        ESP_LOGI(TAG, "║  Local time:     %-21s ║", time_str);
+        ESP_LOGI(TAG, "║  Boot count:     %5lu                 ║", state->boot_count);
+        ESP_LOGI(TAG, "║  Readings taken: %5lu                 ║", state->readings_taken);
+        ESP_LOGI(TAG, "║  Sleep duration: %5llu seconds        ║", sleep_time / 1000000ULL);
+        ESP_LOGI(TAG, "╚════════════════════════════════════════╝");
+        enter_deep_sleep(sleep_time);
+        // Does not return
+    } else {
+        // USB powered - use delay instead of sleep
+        ESP_LOGI(TAG, "USB powered - using delay instead of sleep");
+        vTaskDelay(pdMS_TO_TICKS(sleep_time / 1000));
+        esp_restart();
+    }
+}
+
+static bool init_peripherals(void) {
+    // REMOVED: New I2C driver initialization that conflicted with i2cdev
+    // The i2cdev library (used by light_sensor) will initialize the old I2C driver
+
+    // Initialize light sensor (this will call i2cdev_init internally)
+    if (init_light_sensor(&light_sensor_dev) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize light sensor");
+        return false;
+    }
+
+    // Initialize ADC for battery monitoring
+    if (adc_battery_init() != ESP_OK) {
+        ESP_LOGW(TAG, "Battery monitoring init failed (may not have battery)");
+    }
+
+    // Initialize internal temperature sensor
+    internal_temp_init();
+
+    // Initialize persistent storage
+    persistent_storage_init();
+
+    // Initialize data processor (for sending stored readings)
+    data_processor_init();
+
+    return true;
+}
+
+static void handle_initial_boot(void) {
+    ESP_LOGI(TAG, "=== INITIAL BOOT SEQUENCE ===");
+    ESP_LOGI(TAG, "Performing first-time setup...");
+
+    // Connect to WiFi for initial setup
+    if (!initialize_network_connection(15)) {
+        ESP_LOGE(TAG, "Failed to connect to WiFi on initial boot");
         return;
     }
 
-    // Create and launch the tasks with increased stack sizes to prevent stack overflow
-    // Run send data task first to set the local clock correctly
-    xTaskCreate(task_send_data, "send_data_task", 8192, app_context, 5, NULL);  // Increased from 4096
-    // Give the send_data_task time to connect and perform the initial NTP sync
-    vTaskDelay(pdMS_TO_TICKS(10000));
-    xTaskCreate(task_get_sensor_data, "sensor_task", 6144, app_context, 5, NULL);  // Increased from 4096
+    // Handle NTP synchronization
+    time_t temp_ntp_time = last_ntp_sync_timestamp;
+    handle_ntp_sync(&temp_ntp_time, true);
+    if (temp_ntp_time != last_ntp_sync_timestamp) {
+        last_ntp_sync_timestamp = (uint64_t)time(NULL);
+        ESP_LOGI(TAG, "Initial NTP sync successful");
+    }
 
-    ESP_LOGI(TAG, "Initialization complete. Tasks are running.");
+    // Send initial status
+    send_device_status_if_appropriate();
+
+    // Disconnect WiFi to save power
+    disconnect_wifi_for_power_saving();
+
+    ESP_LOGI(TAG, "=== INITIAL BOOT COMPLETE ===");
+}
+
+static bool is_time_valid(void) {
+    time_t now;
+    time(&now);
+    // Consider time valid if it's after January 1, 2024
+    return (now >= MIN_VALID_TIMESTAMP);
+}
+
+static void clear_reading_buffer(void) {
+    memset(reading_buffer, 0, sizeof(reading_buffer));
+    ESP_LOGI(TAG, "Reading buffer cleared");
+}
+
+static void take_sensor_reading(void) {
+    rtc_sleep_state_t* state = rtc_state_get();
+
+    // Double-check time is valid before taking reading
+    if (!is_time_valid()) {
+        ESP_LOGW(TAG, "Cannot take reading - system time invalid");
+        return;
+    }
+
+    float lux = 0;
+    esp_err_t result = get_ambient_light(light_sensor_dev, &lux);
+
+    if (result != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read light sensor: %s", esp_err_to_name(result));
+        return;
+    }
+
+    ESP_LOGI(TAG, "Light level: %.2f lux", lux);
+
+    // Read internal temperature
+    float chip_temp_c = 0;
+    esp_err_t temp_err = internal_temp_read(&chip_temp_c);
+
+    // Get current time for timestamp
+    time_t now;
+    time(&now);
+
+    // Store reading in buffer (using circular buffer index)
+    int idx = state->readings_taken % MAX_READINGS_BUFFER;
+    reading_buffer[idx].timestamp = now;
+    reading_buffer[idx].lux = lux;
+
+    if (temp_err == ESP_OK) {
+        reading_buffer[idx].chip_temp_c = chip_temp_c;
+        reading_buffer[idx].chip_temp_f = (chip_temp_c * 9.0f / 5.0f) + 32.0f;
+        ESP_LOGI(TAG, "Reading #%lu: Lux=%.2f, Temp=%.1f°C/%.1f°F",
+                 state->readings_taken + 1, lux, chip_temp_c, reading_buffer[idx].chip_temp_f);
+    } else {
+        reading_buffer[idx].chip_temp_c = -999.0f;
+        reading_buffer[idx].chip_temp_f = -999.0f;
+        ESP_LOGI(TAG, "Reading #%lu: Lux=%.2f, Temp=error",
+                 state->readings_taken + 1, lux);
+    }
+
+    state->readings_taken++;
+
+    // Save reading to persistent storage if buffer is full or send failed
+    if ((state->readings_taken % MAX_READINGS_BUFFER == 0) || state->wifi_send_failed) {
+        int count = (state->readings_taken % MAX_READINGS_BUFFER == 0) ?
+                     MAX_READINGS_BUFFER : (state->readings_taken % MAX_READINGS_BUFFER);
+        ESP_LOGI(TAG, "Saving %d readings to persistent storage", count);
+        persistent_storage_save_readings(reading_buffer, count);
+    }
+}
+
+static void send_data_to_server(void) {
+    rtc_sleep_state_t* state = rtc_state_get();
+
+    ESP_LOGI(TAG, "=== DATA SEND CYCLE START ===");
+    ESP_LOGI(TAG, "Free heap: %lu bytes", (unsigned long)esp_get_free_heap_size());
+
+    // Connect to WiFi
+    if (!initialize_network_connection(15)) {
+        ESP_LOGE(TAG, "Failed to connect to WiFi");
+        state->wifi_send_failed = true;
+
+        // Save current readings
+        int count = state->readings_taken % MAX_READINGS_BUFFER;
+        if (count > 0) {
+            persistent_storage_save_readings(reading_buffer, count);
+        }
+        return;
+    }
+
+    ESP_LOGI(TAG, "WiFi connected successfully");
+
+    // Handle NTP synchronization
+    time_t current_time = time(NULL);
+    bool force_ntp_sync = false;
+
+    // Force sync if we haven't synced yet or if it's been a long time
+    if (last_ntp_sync_timestamp == 0 ||
+        ((uint64_t)current_time - last_ntp_sync_timestamp) > (24 * 3600)) { // 24 hours
+        force_ntp_sync = true;
+        ESP_LOGI(TAG, "NTP sync needed (last sync: %llu seconds ago)",
+                 last_ntp_sync_timestamp == 0 ? 0 : (uint64_t)current_time - last_ntp_sync_timestamp);
+    }
+
+    time_t temp_ntp_time = last_ntp_sync_timestamp;
+    handle_ntp_sync(&temp_ntp_time, force_ntp_sync);
+    if (temp_ntp_time != last_ntp_sync_timestamp) {
+        last_ntp_sync_timestamp = (uint64_t)time(NULL);
+    }
+
+    // Send device status (includes battery status)
+    ESP_LOGI(TAG, "Sending device status");
+    send_device_status_if_appropriate();
+
+    // Send stored readings from previous failed attempts
+    if (state->wifi_send_failed) {
+        ESP_LOGI(TAG, "Previous send failed, sending stored readings first");
+        if (send_all_stored_readings()) {
+            ESP_LOGI(TAG, "Successfully sent stored readings");
+        } else {
+            ESP_LOGW(TAG, "Failed to send stored readings");
+        }
+    }
+
+    // Send current buffered readings
+    int count = state->readings_taken % MAX_READINGS_BUFFER;
+    if (count > 0 || state->readings_taken >= MAX_READINGS_BUFFER) {
+        if (count == 0) count = MAX_READINGS_BUFFER;
+
+        ESP_LOGI(TAG, "Sending %d current readings", count);
+        esp_err_t result = api_send_sensor_data(reading_buffer, count);
+
+        if (result == ESP_OK) {
+            ESP_LOGI(TAG, "Successfully sent readings");
+            state->wifi_send_failed = false;
+
+            // Clear the buffer and reset counter after successful send
+            clear_reading_buffer();
+            state->readings_taken = 0;
+        } else {
+            ESP_LOGE(TAG, "Failed to send readings: %s", esp_err_to_name(result));
+            state->wifi_send_failed = true;
+            // Save to persistent storage
+            persistent_storage_save_readings(reading_buffer, count);
+        }
+    } else {
+        ESP_LOGI(TAG, "No new readings to send");
+    }
+
+    // Update last send timestamp
+    state->last_send_timestamp = (uint64_t)time(NULL);
+
+    // Disconnect WiFi for power savings
+    disconnect_wifi_for_power_saving();
+
+    ESP_LOGI(TAG, "=== DATA SEND CYCLE END ===");
 }

@@ -37,7 +37,7 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <esp_log.h>
-#include <driver/i2c_master.h>
+// REMOVED: #include <driver/i2c_master.h>  // This new driver conflicts with i2cdev
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "generated_config.h"

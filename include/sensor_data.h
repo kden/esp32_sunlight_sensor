@@ -13,7 +13,6 @@
 #pragma once
 
 #include <time.h>
-#include <stdbool.h>
 
 /**
  * @brief Structure to hold a single sensor reading for batching.

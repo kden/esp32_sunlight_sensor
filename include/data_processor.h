@@ -12,8 +12,6 @@
 
 #pragma once
 
-#include "app_context.h"
-#include "sensor_data.h"
 #include <stdbool.h>
 
 /**
@@ -22,33 +20,6 @@
  * @return true if initialization was successful, false otherwise
  */
 bool data_processor_init(void);
-
-/**
- * @brief Process buffered sensor readings with automatic buffer management
- *
- * @param context Application context containing the shared buffer
- * @param processor Function to process the readings (send or save)
- * @return true if processing was successful, false on error
- */
-bool process_buffered_readings(app_context_t *context, bool (*processor)(sensor_reading_t*, int));
-
-/**
- * @brief Processor function to send sensor readings
- *
- * @param readings Array of sensor readings
- * @param count Number of readings
- * @return true if successful, false otherwise
- */
-bool send_readings_processor(sensor_reading_t* readings, int count);
-
-/**
- * @brief Processor function to save sensor readings to persistent storage
- *
- * @param readings Array of sensor readings
- * @param count Number of readings
- * @return true if successful, false otherwise
- */
-bool save_readings_processor(sensor_reading_t* readings, int count);
 
 /**
  * @brief Send all stored readings and clear storage on success

@@ -15,7 +15,6 @@
 #include "nvs.h"
 #include "esp_log.h"
 #include <string.h>
-#include <stdarg.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"

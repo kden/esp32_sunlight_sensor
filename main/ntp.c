@@ -50,9 +50,23 @@ bool initialize_sntp(void)
         time(&now);
 
         // Check if SNTP sync is complete AND time is reasonable
-        if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED && is_time_reasonable(now)) {
+        sntp_sync_status_t sync_status = esp_sntp_get_sync_status();
+
+        if (sync_status == SNTP_SYNC_STATUS_COMPLETED && is_time_reasonable(now)) {
             localtime_r(&now, &timeinfo);
             ESP_LOGI(TAG, "Time synchronized successfully: %04d-%02d-%02d %02d:%02d:%02d UTC",
+                     timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                     timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+            return true;
+        }
+
+        // If time is reasonable even without SNTP_SYNC_STATUS_COMPLETED, accept it
+        // This handles cases where sync happens but status isn't set properly
+        if (is_time_reasonable(now) && retry > 10) {
+            ESP_LOGW(TAG, "Time appears reasonable after %d attempts, accepting despite sync_status=%d",
+                     retry, sync_status);
+            localtime_r(&now, &timeinfo);
+            ESP_LOGI(TAG, "Time accepted: %04d-%02d-%02d %02d:%02d:%02d UTC",
                      timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
                      timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
             return true;
